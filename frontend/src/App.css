@@ -1,0 +1,309 @@
+.appLayout {
+  min-height: 100%;
+}
+
+.appHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: auto;
+  min-height: 64px;
+  line-height: normal;
+  padding-inline: 24px;
+  padding-block: 12px;
+  background: rgba(255, 255, 255, 0.8);
+  backdrop-filter: blur(10px);
+  border-bottom: 1px solid rgba(5, 5, 5, 0.06);
+}
+
+body.dark .appHeader {
+  background: rgba(0, 0, 0, 0.35);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.iconToggle {
+  width: 34px;
+  height: 34px;
+  min-width: 34px;
+  aspect-ratio: 1 / 1;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 !important;
+  line-height: 1 !important;
+  box-sizing: border-box;
+  transition: background 160ms ease, border-color 160ms ease, transform 160ms ease, box-shadow 160ms ease;
+}
+
+/* AntD styles are injected at runtime; force a true circle. */
+.ant-btn.iconToggle {
+  width: 34px !important;
+  height: 34px !important;
+  min-width: 34px !important;
+  padding: 0 !important;
+  border-radius: 50% !important;
+  line-height: 1 !important;
+}
+
+.ant-btn.iconToggle .anticon {
+  display: inline-flex;
+  line-height: 1;
+}
+
+.iconToggleLight {
+  background: rgba(250, 219, 20, 0.16);
+  border: 1px solid rgba(250, 219, 20, 0.35);
+  color: #faad14;
+}
+
+.iconToggleDark {
+  background: rgba(114, 46, 209, 0.16);
+  border: 1px solid rgba(114, 46, 209, 0.35);
+  color: #722ed1;
+}
+
+.iconToggleSecretsRedacted {
+  background: rgba(0, 0, 0, 0.06);
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  color: rgba(0, 0, 0, 0.65);
+}
+
+body.dark .iconToggleSecretsRedacted {
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  color: rgba(255, 255, 255, 0.75);
+}
+
+.iconToggleSecretsRaw {
+  background: rgba(82, 196, 26, 0.16);
+  border: 1px solid rgba(82, 196, 26, 0.35);
+  color: #52c41a;
+}
+
+.iconToggle:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 18px rgba(5, 5, 5, 0.10);
+}
+
+.appTitle {
+  display: inline-block;
+}
+
+@supports ((-webkit-background-clip: text) or (background-clip: text)) {
+  .appTitle {
+    background: linear-gradient(90deg, #1677ff 0%, #722ed1 45%, #faad14 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    -webkit-text-fill-color: transparent;
+  }
+}
+
+.appContent {
+  padding: 24px;
+}
+
+.appFooter {
+  text-align: center;
+  background: transparent;
+  padding: 12px 24px 20px;
+}
+
+.container {
+  max-width: 1100px;
+  margin: 0 auto;
+}
+
+.card {
+  border-radius: 12px;
+}
+
+.hostMeta {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 12px;
+}
+
+.serverListHeader {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.mcpCard {
+  border-radius: 12px;
+  transition: box-shadow 160ms ease, border-color 160ms ease, transform 160ms ease;
+}
+
+.mcpCard:hover {
+  border-color: rgba(22, 119, 255, 0.45);
+  box-shadow: 0 6px 18px rgba(5, 5, 5, 0.08);
+  transform: translateY(-1px);
+}
+
+.flashTarget .mcpCard,
+.flashTarget.card,
+.flashTarget .card {
+  box-shadow: 0 0 0 3px rgba(22, 119, 255, 0.28), 0 8px 22px rgba(5, 5, 5, 0.10) !important;
+  border-color: rgba(22, 119, 255, 0.55) !important;
+}
+
+.mcpNameLink {
+  cursor: pointer;
+}
+
+.mcpNameLink:hover {
+  text-decoration: underline;
+}
+
+.mcpNameDisabled {
+  color: rgba(0, 0, 0, 0.45) !important;
+}
+
+.mcpNameDisabled:hover {
+  color: rgba(0, 0, 0, 0.65) !important;
+}
+
+.statusDot {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  display: inline-block;
+  box-shadow: 0 0 0 2px rgba(5, 5, 5, 0.06);
+}
+
+.statusDotOk {
+  background: #52c41a;
+}
+
+.statusDotFail {
+  background: #ff4d4f;
+  cursor: pointer;
+}
+
+.statusDotChecking {
+  background: #1677ff;
+  animation: statusDotPulse 1s ease-in-out infinite;
+}
+
+@keyframes statusDotPulse {
+  0% { opacity: 0.5; transform: scale(0.9); }
+  50% { opacity: 1; transform: scale(1); }
+  100% { opacity: 0.5; transform: scale(0.9); }
+}
+
+.hostProjectHighlight {
+  background: rgba(250, 173, 20, 0.35);
+  border-radius: 4px;
+  padding-inline: 2px;
+}
+
+.outlinePopover .ant-popover-title {
+  margin-bottom: 8px;
+}
+
+.outlinePopover .ant-popover-inner {
+  padding: 12px;
+  border-radius: 14px;
+}
+
+.outlineTitle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding-inline: 2px;
+}
+
+.outlinePanel {
+  width: 300px;
+}
+
+.outlineControls {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.outlineList {
+  max-height: 60vh;
+  overflow: auto;
+}
+
+.outlineItem {
+  padding: 0 !important;
+  border: 0 !important;
+  cursor: pointer;
+}
+
+.outlineItemRow {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  transition: background 160ms ease;
+}
+
+.outlineItemRow:hover {
+  background: rgba(22, 119, 255, 0.06);
+}
+
+body.dark .outlineItemRow:hover {
+  background: rgba(22, 119, 255, 0.18);
+}
+
+.outlineItemName {
+  min-width: 0;
+  flex: 1;
+}
+
+.outlineItemStatus {
+  flex: 0 0 auto;
+}
+
+.mcpTitle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+}
+
+.mcpTitleLeft {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex: 1;
+}
+
+.drawerToolbar {
+  display: flex;
+  justify-content: flex-start;
+  margin-bottom: 12px;
+}
+
+.detailsDrawer .ant-drawer-body {
+  padding-top: 12px;
+}
+
+.scriptDrawer .ant-drawer-body {
+  padding-top: 12px;
+}
+
+.mcpRowActions {
+  gap: 2px !important;
+}
+
+.mcpRowActions .ant-btn.ant-btn-text {
+  padding-inline: 6px;
+}

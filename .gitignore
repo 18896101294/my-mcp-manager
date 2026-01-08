@@ -1,0 +1,22 @@
+.DS_Store
+
+# local/editor
+.cursor/
+.claude/
+.tmp/
+
+# dependencies & builds
+**/node_modules/
+**/dist/
+**/build/
+**/.vite/
+**/.turbo/
+**/coverage/
+
+# env files
+**/.env
+**/.env.*
+
+# app data / backups (may contain secrets)
+data/backups/
+

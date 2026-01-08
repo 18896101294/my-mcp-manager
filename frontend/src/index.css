@@ -1,0 +1,16 @@
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: #f5f5f5;
+  color-scheme: light;
+}
+
+body.dark {
+  background: #0f0f10;
+  color-scheme: dark;
+}
