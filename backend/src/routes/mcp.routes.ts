@@ -2,7 +2,7 @@ import { Router, Request, Response } from 'express';
 import { configService } from '../services/ConfigService.js';
 import { checkMcpServers } from '../services/McpCheckService.js';
 import { getMcpCapabilitiesBatch } from '../services/McpCapabilitiesService.js';
-import { generateAiSummaryWithCodex } from '../services/AiSummaryService.js';
+import { generateAiSummary } from '../services/AiSummaryService.js';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
@@ -195,9 +195,17 @@ router.post('/ai-summary', async (req: Request, res: Response) => {
     const cap = capResp[id];
     const tools = cap && cap.ok ? cap.capabilities.tools.map(t => ({ name: t.name, description: t.description })) : [];
 
-    const result = await generateAiSummaryWithCodex(
+    const isClaudeHost = targetHostId === 'claude-code' || targetHostId.startsWith('claude-code');
+    const isCodexHost = targetHostId === 'codex' || targetHostId.startsWith('codex');
+    const preferredProvider = isClaudeHost ? 'claude' : isCodexHost ? 'codex' : 'auto';
+
+    const result = await generateAiSummary(
       { id, config: server, tools },
-      { timeoutMs: effectiveTimeoutMs, model: (typeof model === 'string' && model.trim()) ? model.trim() : undefined }
+      {
+        timeoutMs: effectiveTimeoutMs,
+        model: (typeof model === 'string' && model.trim()) ? model.trim() : undefined,
+        preferredProvider: preferredProvider as any
+      }
     );
 
     if (!result.ok) {

@@ -13,8 +13,31 @@ export type AiSummaryInput = {
 };
 
 export type AiSummaryResult =
-  | { ok: true; latencyMs: number; provider: 'codex'; summary: string }
-  | { ok: false; latencyMs: number; provider: 'codex'; error: string };
+  | { ok: true; latencyMs: number; provider: 'codex' | 'claude'; summary: string }
+  | { ok: false; latencyMs: number; provider: 'codex' | 'claude'; error: string };
+
+const isCliAvailable = async (cmd: string): Promise<boolean> => {
+  const tool = process.platform === 'win32' ? 'where' : 'which';
+  return await new Promise<boolean>((resolve) => {
+    const child = spawn(tool, [cmd], { stdio: ['ignore', 'ignore', 'ignore'] });
+    const t = setTimeout(() => {
+      try {
+        child.kill('SIGKILL');
+      } catch {
+        // ignore
+      }
+      resolve(false);
+    }, 1500);
+    child.once('close', (code) => {
+      clearTimeout(t);
+      resolve(code === 0);
+    });
+    child.once('error', () => {
+      clearTimeout(t);
+      resolve(false);
+    });
+  });
+};
 
 const redactConfigForAi = (cfg: MCPServerConfig): MCPServerConfig => {
   const next: MCPServerConfig = { ...(cfg as any) };
@@ -194,4 +217,101 @@ export const generateAiSummaryWithCodex = async (
       // ignore
     }
   }
+};
+
+export const generateAiSummaryWithClaude = async (
+  input: AiSummaryInput,
+  options?: { model?: string; timeoutMs?: number }
+): Promise<AiSummaryResult> => {
+  const start = Date.now();
+  const timeoutMs = typeof options?.timeoutMs === 'number' && Number.isFinite(options.timeoutMs)
+    ? Math.max(5_000, Math.min(180_000, Math.floor(options.timeoutMs)))
+    : 60_000;
+
+  const prompt = buildPromptZh(input);
+
+  const candidates: Array<string[]> = [];
+  if (options?.model) {
+    candidates.push(['-p', prompt, '--model', options.model]);
+    candidates.push(['--print', prompt, '--model', options.model]);
+  }
+  candidates.push(['-p', prompt]);
+  candidates.push(['--print', prompt]);
+
+  for (const args of candidates) {
+    try {
+      const child = spawn('claude', args, {
+        stdio: ['ignore', 'pipe', 'pipe'],
+        env: { ...process.env, NO_COLOR: '1' }
+      });
+
+      const stdoutChunks: Buffer[] = [];
+      const stderrChunks: Buffer[] = [];
+      child.stdout.on('data', (d: Buffer) => stdoutChunks.push(Buffer.from(d)));
+      child.stderr.on('data', (d: Buffer) => stderrChunks.push(Buffer.from(d)));
+
+      const done = await new Promise<{ code: number | null }>((resolve, reject) => {
+        const t = setTimeout(() => {
+          try {
+            child.kill('SIGKILL');
+          } catch {
+            // ignore
+          }
+        }, timeoutMs);
+        child.once('error', (err) => {
+          clearTimeout(t);
+          reject(err);
+        });
+        child.once('close', (code) => {
+          clearTimeout(t);
+          resolve({ code });
+        });
+      });
+
+      const stdout = Buffer.concat(stdoutChunks).toString('utf-8').trim();
+      const stderr = Buffer.concat(stderrChunks).toString('utf-8').trim();
+      if (done.code !== 0) continue;
+
+      let summary = stdout.replace(/\r?\n+/g, ' ').replace(/\s+/g, ' ').trim();
+      if (!summary) summary = stderr.replace(/\r?\n+/g, ' ').replace(/\s+/g, ' ').trim();
+      if (!summary) {
+        return { ok: false, provider: 'claude', latencyMs: Date.now() - start, error: 'Empty summary from claude' };
+      }
+      return { ok: true, provider: 'claude', latencyMs: Date.now() - start, summary };
+    } catch {
+      // try next
+    }
+  }
+
+  return {
+    ok: false,
+    provider: 'claude',
+    latencyMs: Date.now() - start,
+    error: 'Failed to run claude CLI (non-interactive); ensure `claude` is installed and supports `-p` or `--print`.'
+  };
+};
+
+export const generateAiSummary = async (
+  input: AiSummaryInput,
+  options?: { model?: string; timeoutMs?: number; preferredProvider?: 'auto' | 'codex' | 'claude' }
+): Promise<AiSummaryResult> => {
+  const preferred = options?.preferredProvider ?? 'auto';
+  const hasCodex = await isCliAvailable('codex');
+  const hasClaude = await isCliAvailable('claude');
+
+  // Requirement: if both exist, use codex.
+  if (hasCodex) {
+    return await generateAiSummaryWithCodex(input, options);
+  }
+
+  if (hasClaude && (preferred === 'auto' || preferred === 'claude' || preferred === 'codex')) {
+    return await generateAiSummaryWithClaude(input, options);
+  }
+
+  return {
+    ok: false,
+    provider: preferred === 'claude' ? 'claude' : 'codex',
+    latencyMs: 0,
+    error: 'No supported AI CLI available. Install and login `codex` (preferred) or `claude`.'
+  };
 };
