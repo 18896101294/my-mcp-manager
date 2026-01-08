@@ -42,6 +42,14 @@ export const mcpApi = {
   capabilities: (ids?: string[], hostId?: string, timeoutMs?: number) =>
     api.post('/mcp/capabilities', { ids, hostId, timeoutMs }),
 
+  // 生成 AI 简介
+  aiSummary: (id: string, hostId?: string, timeoutMs?: number, model?: string, signal?: AbortSignal) => {
+    const effectiveTimeoutMs = typeof timeoutMs === 'number' && Number.isFinite(timeoutMs) ? timeoutMs : 60_000;
+    // Axios instance default timeout is 10s; override for AI generation calls.
+    const requestTimeoutMs = Math.max(30_000, Math.min(180_000, effectiveTimeoutMs + 15_000));
+    return api.post('/mcp/ai-summary', { id, hostId, timeoutMs: effectiveTimeoutMs, model }, { timeout: requestTimeoutMs, signal });
+  },
+
   // 查看本地脚本内容
   getScript: (id: string, hostId?: string) =>
     api.get('/mcp/script', { params: { id, hostId } })

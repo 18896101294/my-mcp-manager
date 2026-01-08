@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState, useEffect } from 'react';
 import { Alert, Button, Card, Checkbox, Collapse, ConfigProvider, Drawer, Dropdown, Empty, FloatButton, Input, Layout, List, message, Modal, Popover, Progress, Segmented, Select, Space, Spin, Switch, Tabs, Tag, Tooltip, Typography, theme as antdTheme } from 'antd';
-import { AppstoreOutlined, CheckCircleOutlined, CheckSquareOutlined, ClearOutlined, ClockCircleOutlined, CloseCircleOutlined, CloseOutlined, CopyOutlined, DeleteOutlined, DownloadOutlined, EditOutlined, ExportOutlined, FileTextOutlined, LockOutlined, MoreOutlined, MoonFilled, OrderedListOutlined, PlayCircleOutlined, PlusOutlined, ProfileOutlined, RedoOutlined, ReloadOutlined, SearchOutlined, StarFilled, StarOutlined, StopOutlined, SunFilled, UnlockOutlined, UpOutlined } from '@ant-design/icons';
+import { AppstoreOutlined, CheckCircleOutlined, CheckSquareOutlined, ClearOutlined, ClockCircleOutlined, CloseCircleOutlined, CloseOutlined, CopyOutlined, DeleteOutlined, DownloadOutlined, EditOutlined, ExportOutlined, FileTextOutlined, LockOutlined, MoreOutlined, MoonFilled, OrderedListOutlined, PlayCircleOutlined, PlusOutlined, ProfileOutlined, RedoOutlined, ReloadOutlined, RobotOutlined, SearchOutlined, StarFilled, StarOutlined, StopOutlined, SunFilled, UnlockOutlined, UpOutlined } from '@ant-design/icons';
 import Editor from '@monaco-editor/react';
 import { mcpApi } from './services/api';
 import { MCPForm } from './components/MCPForm';
@@ -133,6 +133,7 @@ function App() {
   const [detailsTab, setDetailsTab] = useState<'config' | 'capabilities'>('config');
   const [capabilitiesByKey, setCapabilitiesByKey] = useState<Record<string, McpCapabilitiesResult>>(() => ({}));
   const [capabilitiesLoadingKey, setCapabilitiesLoadingKey] = useState<string>('');
+  const [aiSummaryLoading, setAiSummaryLoading] = useState(false);
   const [scriptView, setScriptView] = useState<{
     id: string;
     scriptPath: string;
@@ -931,6 +932,54 @@ function App() {
     }
   };
 
+  const generateAiSummaryForDetails = async () => {
+    if (!details) return;
+    if (!selectedHost) {
+      message.warning('请先选择配置源');
+      return;
+    }
+
+    try {
+      setAiSummaryLoading(true);
+      const resp = await mcpApi.aiSummary(details.id, selectedHost, 60_000);
+      if (!resp.data?.success) {
+        message.error(resp.data?.error || '生成 AI 简介失败');
+        return;
+      }
+      const summary = String(resp.data?.data?.summary ?? '').trim();
+      if (!summary) {
+        message.error('AI 简介为空');
+        return;
+      }
+
+      const current = summaryDraft.trim();
+      Modal.confirm({
+        title: '简介预览',
+        icon: <RobotOutlined />,
+        width: 720,
+        okText: current ? '覆盖简介' : '填入简介',
+        cancelText: '取消',
+        content: (
+          <Space direction="vertical" size={10} style={{ width: '100%' }}>
+            <Input.TextArea
+              readOnly
+              value={summary}
+              autoSize={{ minRows: 3, maxRows: 6 }}
+              style={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace' }}
+            />
+          </Space>
+        ),
+        onOk: () => {
+          setSummaryDraft(summary);
+        }
+      });
+    } catch (e: any) {
+      message.error(e?.response?.data?.error || e?.message || '生成 AI 简介失败');
+    } finally {
+      setAiSummaryLoading(false);
+    }
+  };
+
   const flash = (key: string) => {
     setFlashTarget(key);
     if (flashTimerRef.current) window.clearTimeout(flashTimerRef.current);
@@ -1150,6 +1199,7 @@ function App() {
         }
         return;
       }
+
       saveManualSummaryToHost(hostId, id, text);
     }, 450);
 
@@ -2067,16 +2117,16 @@ function App() {
 	            width={720}
 		            onClose={() => setDetails(null)}
 		          >
-	            {details && (
-	              <>
-	                <Input.TextArea
-	                  value={summaryDraft}
-	                  onChange={(e) => setSummaryDraft(e.target.value)}
-	                  placeholder="为该 MCP 添加简介（仅本地保存，不会写回配置文件）"
-	                  autoSize={{ minRows: 3, maxRows: 6 }}
-	                  style={{ marginBottom: 8 }}
-	                />
-
+		            {details && (
+		              <>
+                  <Input.TextArea
+                    value={summaryDraft}
+                    onChange={(e) => setSummaryDraft(e.target.value)}
+                    placeholder="为该 MCP 添加简介（仅本地保存，不会写回配置文件）"
+                    autoSize={{ minRows: 3, maxRows: 6 }}
+                    style={{ marginBottom: 8 }}
+                  />
+		
                   <Tabs
                     activeKey={detailsTab}
                     onChange={(k) => setDetailsTab(k as any)}
@@ -2086,12 +2136,21 @@ function App() {
                         label: '配置',
                         children: (
                           <>
-                            <div className="drawerToolbar" style={{ marginTop: 0 }}>
-                              <Space wrap size={6}>
-                                <Tooltip title="默认脱敏（env/headers）。如需原始内容请使用“显示敏感信息”或“复制原始 JSON”。">
-                                  <Button
-                                    icon={<CopyOutlined />}
-                                    onClick={() => {
+	                            <div className="drawerToolbar" style={{ marginTop: 0 }}>
+	                              <Space wrap size={6}>
+                                  <Tooltip title="调用本地 codex CLI（非交互）基于 tools 列表生成一句话简介">
+                                    <Button
+                                      icon={<RobotOutlined />}
+                                      loading={aiSummaryLoading}
+                                      onClick={generateAiSummaryForDetails}
+                                    >
+                                      生成 AI 简介
+                                    </Button>
+                                  </Tooltip>
+	                                <Tooltip title="默认脱敏（env/headers）。如需原始内容请使用“显示敏感信息”或“复制原始 JSON”。">
+	                                  <Button
+	                                    icon={<CopyOutlined />}
+	                                    onClick={() => {
                                       const text = showSecrets ? toJson(details.config) : toJson(redactConfig(details.config));
                                       copyToClipboard(text);
                                     }}

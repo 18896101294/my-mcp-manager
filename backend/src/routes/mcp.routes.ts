@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import { configService } from '../services/ConfigService.js';
 import { checkMcpServers } from '../services/McpCheckService.js';
 import { getMcpCapabilitiesBatch } from '../services/McpCapabilitiesService.js';
+import { generateAiSummaryWithCodex } from '../services/AiSummaryService.js';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
@@ -148,6 +149,73 @@ router.post('/capabilities', async (req: Request, res: Response) => {
     });
   } catch (error) {
     console.error('Failed to get MCP capabilities:', error);
+    res.status(500).json({
+      success: false,
+      error: error instanceof Error ? error.message : 'Unknown error'
+    });
+  }
+});
+
+/**
+ * POST /api/mcp/ai-summary
+ * 使用本地 codex CLI 生成 MCP 的“一句话简介”
+ * body: { hostId?: string, id: string, timeoutMs?: number, model?: string }
+ */
+router.post('/ai-summary', async (req: Request, res: Response) => {
+  try {
+    const { hostId, id, timeoutMs, model } = req.body ?? {};
+    if (!id || typeof id !== 'string') {
+      return res.status(400).json({ success: false, error: 'Missing required field: id' });
+    }
+
+    const hosts = await configService.getHosts();
+    const targetHostId = hostId || hosts.find(h => h.active)?.id;
+    if (!targetHostId) {
+      return res.status(400).json({ success: false, error: 'No target host specified' });
+    }
+
+    const host = hosts.find(h => h.id === targetHostId);
+    const config = await configService.readConfig(targetHostId);
+    const server = config.mcpServers[id];
+    if (!server) {
+      return res.status(404).json({ success: false, error: `MCP server not found: ${id}` });
+    }
+
+    const effectiveTimeoutMs = typeof timeoutMs === 'number' && Number.isFinite(timeoutMs)
+      ? Math.max(5_000, Math.min(180_000, Math.floor(timeoutMs)))
+      : 60_000;
+
+    // Fetch tools first (best signal) — fall back to empty on failure.
+    const capResp = await getMcpCapabilitiesBatch(
+      { [id]: server },
+      [id],
+      { timeoutMs: Math.min(15_000, effectiveTimeoutMs), concurrency: 1 },
+      host?.scope === 'project' && host.projectPath ? { cwd: host.projectPath } : undefined
+    );
+    const cap = capResp[id];
+    const tools = cap && cap.ok ? cap.capabilities.tools.map(t => ({ name: t.name, description: t.description })) : [];
+
+    const result = await generateAiSummaryWithCodex(
+      { id, config: server, tools },
+      { timeoutMs: effectiveTimeoutMs, model: (typeof model === 'string' && model.trim()) ? model.trim() : undefined }
+    );
+
+    if (!result.ok) {
+      return res.status(500).json({ success: false, error: result.error });
+    }
+
+    res.json({
+      success: true,
+      data: {
+        hostId: targetHostId,
+        id,
+        summary: result.summary,
+        latencyMs: result.latencyMs,
+        provider: result.provider
+      }
+    });
+  } catch (error) {
+    console.error('Failed to generate AI summary:', error);
     res.status(500).json({
       success: false,
       error: error instanceof Error ? error.message : 'Unknown error'
