@@ -21,6 +21,12 @@ interface MCPServer {
   disabled?: boolean;
 }
 
+type McpTool = { name: string; description?: string; inputSchema?: unknown };
+type McpCapabilities = { tools: McpTool[]; resources: unknown[]; prompts: unknown[] };
+type McpCapabilitiesResult =
+  | { ok: true; latencyMs: number; supported: { tools: boolean; resources: boolean; prompts: boolean }; capabilities: McpCapabilities }
+  | { ok: false; latencyMs: number; error: string };
+
 interface HostInfo {
   id: string;
   name: string;
@@ -124,6 +130,9 @@ function App() {
   const [summariesByHost, setSummariesByHost] = useState<Record<string, SummariesMap>>(() => ({}));
   const [summaryDraft, setSummaryDraft] = useState<string>('');
   const skipNextSummaryAutosaveRef = useRef<boolean>(false);
+  const [detailsTab, setDetailsTab] = useState<'config' | 'capabilities'>('config');
+  const [capabilitiesByKey, setCapabilitiesByKey] = useState<Record<string, McpCapabilitiesResult>>(() => ({}));
+  const [capabilitiesLoadingKey, setCapabilitiesLoadingKey] = useState<string>('');
   const [scriptView, setScriptView] = useState<{
     id: string;
     scriptPath: string;
@@ -216,6 +225,11 @@ function App() {
     progressTimersRef.current.clear();
     mcpCardRefs.current.clear();
   }, [selectedHost]);
+
+  useEffect(() => {
+    if (!details) return;
+    setDetailsTab('config');
+  }, [details?.id, selectedHost]);
 
   useEffect(() => {
     try {
@@ -876,6 +890,45 @@ function App() {
     const summaryHostId = (isClaudeProject && origin === 'global') ? 'claude-code' : (selectedHost || 'none');
     setDetails({ id, config: cfg, summaryHostId });
     markUsed(id);
+  };
+
+  const detailsCapabilitiesKey = useMemo(() => {
+    if (!details || !selectedHost) return '';
+    return `${selectedHost}:${details.id}`;
+  }, [details?.id, selectedHost]);
+
+  const detailsCapabilities = detailsCapabilitiesKey ? capabilitiesByKey[detailsCapabilitiesKey] : undefined;
+  const detailsCapabilitiesLoading = detailsCapabilitiesKey && capabilitiesLoadingKey === detailsCapabilitiesKey;
+
+  const fetchDetailsCapabilities = async () => {
+    if (!details) return;
+    if (!selectedHost) {
+      message.warning('请先选择配置源');
+      return;
+    }
+
+    const key = `${selectedHost}:${details.id}`;
+    try {
+      setCapabilitiesLoadingKey(key);
+      const resp = await mcpApi.capabilities([details.id], selectedHost, 10_000);
+      if (!resp.data?.success) {
+        message.error(resp.data?.error || '获取能力失败');
+        return;
+      }
+
+      const result = resp.data?.data?.results?.[details.id] as McpCapabilitiesResult | undefined;
+      if (!result) {
+        message.error('未返回能力数据');
+        return;
+      }
+
+      setCapabilitiesByKey(prev => ({ ...prev, [key]: result }));
+      if (!result.ok) message.warning(`获取失败：${result.error}`);
+    } catch (e: any) {
+      message.error(e?.response?.data?.error || '获取能力失败');
+    } finally {
+      setCapabilitiesLoadingKey(prev => (prev === key ? '' : prev));
+    }
   };
 
   const flash = (key: string) => {
@@ -1996,9 +2049,9 @@ function App() {
             </>
           )}
 
-	          <Drawer
+		          <Drawer
               className="detailsDrawer"
-	            title={
+		            title={
 	              <Space size={8} style={{ minWidth: 0 }}>
 	                <ProfileOutlined />
 	                {details ? (
@@ -2012,87 +2065,225 @@ function App() {
 	            }
 	            open={!!details}
 	            width={720}
-	            onClose={() => setDetails(null)}
-	          >
-            {details && (
-              <>
-                <Input.TextArea
-                  value={summaryDraft}
-                  onChange={(e) => setSummaryDraft(e.target.value)}
-                  placeholder="为该 MCP 添加简介（仅本地保存，不会写回配置文件）"
-                  autoSize={{ minRows: 3, maxRows: 6 }}
-                  style={{ marginBottom: 8 }}
-                />
+		            onClose={() => setDetails(null)}
+		          >
+	            {details && (
+	              <>
+	                <Input.TextArea
+	                  value={summaryDraft}
+	                  onChange={(e) => setSummaryDraft(e.target.value)}
+	                  placeholder="为该 MCP 添加简介（仅本地保存，不会写回配置文件）"
+	                  autoSize={{ minRows: 3, maxRows: 6 }}
+	                  style={{ marginBottom: 8 }}
+	                />
 
-                <div className="drawerToolbar" style={{ marginTop: 0 }}>
-                  <Space wrap size={6}>
-                    <Tooltip title="默认脱敏（env/headers）。如需原始内容请使用“显示敏感信息”或“复制原始 JSON”。">
-                      <Button
-                        icon={<CopyOutlined />}
-                        onClick={() => {
-                          const text = showSecrets ? toJson(details.config) : toJson(redactConfig(details.config));
-                          copyToClipboard(text);
-                        }}
-                      >
-                        复制 JSON
-                      </Button>
-                    </Tooltip>
-                    {isCodexHost && (
-                      <Tooltip title="默认脱敏（env/headers）。如需原始内容请使用“显示敏感信息”。">
-                        <Button
-                          icon={<CopyOutlined />}
-                          onClick={() => {
-                            const cfg = showSecrets ? details.config : redactConfig(details.config);
-                            const text = codexTomlForServer(details.id, cfg);
-                            copyToClipboard(text);
-                          }}
-                        >
-                          复制 TOML
-                        </Button>
-                      </Tooltip>
-                    )}
-                    {(isCodexHost || isClaudeCodeHost) && (
-                      <Button
-                        icon={<CopyOutlined />}
-                        onClick={async () => {
-	                          const cfg = showSecrets ? details.config : redactConfig(details.config);
-	                          const cmd = buildInstallCliCommand(details.id, cfg, selectedHostInfo);
-	                          if (!cmd) {
-                            message.error('无法生成安装命令');
-                            return;
-                          }
-                          await copyToClipboard(cmd);
-                        }}
-	                      >
-	                        复制安装命令
-	                      </Button>
-	                    )}
-                    <Tooltip title="复制原始 JSON（包含敏感信息）">
-                      <Button danger icon={<CopyOutlined />} onClick={() => copyRawWithConfirm(toJson(details.config))}>
-                        复制原始 JSON
-                      </Button>
-                    </Tooltip>
-                  </Space>
-                </div>
+                  <Tabs
+                    activeKey={detailsTab}
+                    onChange={(k) => setDetailsTab(k as any)}
+                    items={[
+                      {
+                        key: 'config',
+                        label: '配置',
+                        children: (
+                          <>
+                            <div className="drawerToolbar" style={{ marginTop: 0 }}>
+                              <Space wrap size={6}>
+                                <Tooltip title="默认脱敏（env/headers）。如需原始内容请使用“显示敏感信息”或“复制原始 JSON”。">
+                                  <Button
+                                    icon={<CopyOutlined />}
+                                    onClick={() => {
+                                      const text = showSecrets ? toJson(details.config) : toJson(redactConfig(details.config));
+                                      copyToClipboard(text);
+                                    }}
+                                  >
+                                    复制 JSON
+                                  </Button>
+                                </Tooltip>
+                                {isCodexHost && (
+                                  <Tooltip title="默认脱敏（env/headers）。如需原始内容请使用“显示敏感信息”。">
+                                    <Button
+                                      icon={<CopyOutlined />}
+                                      onClick={() => {
+                                        const cfg = showSecrets ? details.config : redactConfig(details.config);
+                                        const text = codexTomlForServer(details.id, cfg);
+                                        copyToClipboard(text);
+                                      }}
+                                    >
+                                      复制 TOML
+                                    </Button>
+                                  </Tooltip>
+                                )}
+                                {(isCodexHost || isClaudeCodeHost) && (
+                                  <Button
+                                    icon={<CopyOutlined />}
+                                    onClick={async () => {
+                                      const cfg = showSecrets ? details.config : redactConfig(details.config);
+                                      const cmd = buildInstallCliCommand(details.id, cfg, selectedHostInfo);
+                                      if (!cmd) {
+                                        message.error('无法生成安装命令');
+                                        return;
+                                      }
+                                      await copyToClipboard(cmd);
+                                    }}
+                                  >
+                                    复制安装命令
+                                  </Button>
+                                )}
+                                <Tooltip title="复制原始 JSON（包含敏感信息）">
+                                  <Button danger icon={<CopyOutlined />} onClick={() => copyRawWithConfirm(toJson(details.config))}>
+                                    复制原始 JSON
+                                  </Button>
+                                </Tooltip>
+                              </Space>
+                            </div>
 
-                <div style={{ border: '1px solid rgba(5, 5, 5, 0.12)', borderRadius: 8, overflow: 'hidden', height: '60vh' }}>
-                  <Editor
-                    language="json"
-                    theme={darkMode ? 'vs-dark' : 'vs'}
-                    value={showSecrets ? toJson(details.config) : toJson(redactConfig(details.config))}
-                    options={{
-                      readOnly: true,
-                      minimap: { enabled: false },
-                      scrollBeyondLastLine: false,
-                      wordWrap: 'on',
-                      fontSize: 13,
-                      automaticLayout: true
-                    }}
+                            <div style={{ border: '1px solid rgba(5, 5, 5, 0.12)', borderRadius: 8, overflow: 'hidden', height: '60vh' }}>
+                              <Editor
+                                language="json"
+                                theme={darkMode ? 'vs-dark' : 'vs'}
+                                value={showSecrets ? toJson(details.config) : toJson(redactConfig(details.config))}
+                                options={{
+                                  readOnly: true,
+                                  minimap: { enabled: false },
+                                  scrollBeyondLastLine: false,
+                                  wordWrap: 'on',
+                                  fontSize: 13,
+                                  automaticLayout: true
+                                }}
+                              />
+                            </div>
+                          </>
+                        )
+                      },
+                      {
+                        key: 'capabilities',
+                        label: '功能',
+                        children: (
+                          <Space direction="vertical" size={10} style={{ width: '100%' }}>
+                            <Space wrap size={6}>
+                              <Button
+                                icon={<PlayCircleOutlined />}
+                                onClick={fetchDetailsCapabilities}
+                                loading={!!detailsCapabilitiesLoading}
+                                disabled={!selectedHost}
+                              >
+                                发现功能
+                              </Button>
+                              <Button
+                                icon={<CopyOutlined />}
+                                disabled={!detailsCapabilities || !detailsCapabilities.ok}
+                                onClick={() => {
+                                  if (!detailsCapabilities || !detailsCapabilities.ok) return;
+                                  copyToClipboard(toJson(detailsCapabilities.capabilities));
+                                }}
+                              >
+                                复制结果
+                              </Button>
+                              {detailsCapabilities && (
+                                <Tag color={detailsCapabilities.ok ? 'green' : 'red'} style={{ marginInlineEnd: 0 }}>
+                                  {detailsCapabilities.ok ? `OK ${detailsCapabilities.latencyMs}ms` : `失败 ${detailsCapabilities.latencyMs}ms`}
+                                </Tag>
+                              )}
+                              {detailsCapabilities?.ok && (
+                                null
+                              )}
+                            </Space>
+
+                            {!detailsCapabilities ? (
+                              <Empty description="未获取。点击上方“发现功能”读取该 MCP 暴露的 tools/resources/prompts。" />
+                            ) : !detailsCapabilities.ok ? (
+                              <Alert message="获取能力失败" description={detailsCapabilities.error} type="error" showIcon />
+                            ) : (
+                              <Tabs
+                                size="small"
+                                items={[
+                                  {
+                                    key: 'tools',
+                                    label: `Tools（${detailsCapabilities.capabilities.tools.length}${detailsCapabilities.supported.tools ? '' : ' / 不支持'}）`,
+                                    children: detailsCapabilities.supported.tools ? (
+                                      detailsCapabilities.capabilities.tools.length === 0 ? (
+                                        <Empty description="tools 为空" />
+                                      ) : (
+                                        <Collapse
+                                          size="small"
+                                          items={detailsCapabilities.capabilities.tools.map((t, idx) => ({
+                                            key: `${idx}:${t.name}`,
+                                            label: (
+                                              <Space size={8} style={{ minWidth: 0 }}>
+                                                <Text strong>{t.name}</Text>
+                                                {t.description ? (
+                                                  <Text type="secondary" ellipsis={{ tooltip: t.description }} style={{ maxWidth: 520 }}>
+                                                    {t.description}
+                                                  </Text>
+                                                ) : null}
+                                              </Space>
+                                            ),
+                                            children: (
+                                              <Space direction="vertical" size={8} style={{ width: '100%' }}>
+                                                {t.description ? <Text type="secondary">{t.description}</Text> : null}
+                                                <Text type="secondary">inputSchema</Text>
+                                                <Input.TextArea
+                                                  readOnly
+                                                  value={t.inputSchema ? toJson(t.inputSchema) : '(no inputSchema)'}
+                                                  autoSize={{ minRows: 6, maxRows: 16 }}
+                                                  style={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace' }}
+                                                />
+                                              </Space>
+                                            )
+                                          }))}
+                                        />
+                                      )
+                                    ) : (
+                                      <Empty description="该 MCP 未实现 tools/list" />
+                                    )
+                                  },
+                                  {
+                                    key: 'resources',
+                                    label: `Resources（${detailsCapabilities.capabilities.resources.length}${detailsCapabilities.supported.resources ? '' : ' / 不支持'}）`,
+                                    children: detailsCapabilities.supported.resources ? (
+                                      detailsCapabilities.capabilities.resources.length === 0 ? (
+                                        <Empty description="resources 为空" />
+                                      ) : (
+                                        <Input.TextArea
+                                          readOnly
+                                          value={toJson(detailsCapabilities.capabilities.resources)}
+                                          autoSize={{ minRows: 10, maxRows: 24 }}
+                                          style={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace' }}
+                                        />
+                                      )
+                                    ) : (
+                                      <Empty description="该 MCP 未实现 resources/list" />
+                                    )
+                                  },
+                                  {
+                                    key: 'prompts',
+                                    label: `Prompts（${detailsCapabilities.capabilities.prompts.length}${detailsCapabilities.supported.prompts ? '' : ' / 不支持'}）`,
+                                    children: detailsCapabilities.supported.prompts ? (
+                                      detailsCapabilities.capabilities.prompts.length === 0 ? (
+                                        <Empty description="prompts 为空" />
+                                      ) : (
+                                        <Input.TextArea
+                                          readOnly
+                                          value={toJson(detailsCapabilities.capabilities.prompts)}
+                                          autoSize={{ minRows: 10, maxRows: 24 }}
+                                          style={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace' }}
+                                        />
+                                      )
+                                    ) : (
+                                      <Empty description="该 MCP 未实现 prompts/list" />
+                                    )
+                                  }
+                                ]}
+                              />
+                            )}
+                          </Space>
+                        )
+                      }
+                    ]}
                   />
-                </div>
-              </>
-            )}
-          </Drawer>
+	              </>
+	            )}
+	          </Drawer>
 
           <Drawer
             title={bulkExport?.title ?? '批量导出'}

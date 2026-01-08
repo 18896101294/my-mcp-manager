@@ -38,6 +38,10 @@ export const mcpApi = {
   check: (ids?: string[], hostId?: string, timeoutMs?: number, signal?: AbortSignal) =>
     api.post('/mcp/check', { ids, hostId, timeoutMs }, signal ? { signal } : undefined),
 
+  // 获取能力（tools/resources/prompts）
+  capabilities: (ids?: string[], hostId?: string, timeoutMs?: number) =>
+    api.post('/mcp/capabilities', { ids, hostId, timeoutMs }),
+
   // 查看本地脚本内容
   getScript: (id: string, hostId?: string) =>
     api.get('/mcp/script', { params: { id, hostId } })

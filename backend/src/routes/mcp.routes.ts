@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { configService } from '../services/ConfigService.js';
 import { checkMcpServers } from '../services/McpCheckService.js';
+import { getMcpCapabilitiesBatch } from '../services/McpCapabilitiesService.js';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
@@ -99,6 +100,54 @@ router.post('/check', async (req: Request, res: Response) => {
     });
   } catch (error) {
     console.error('Failed to check MCP servers:', error);
+    res.status(500).json({
+      success: false,
+      error: error instanceof Error ? error.message : 'Unknown error'
+    });
+  }
+});
+
+/**
+ * POST /api/mcp/capabilities
+ * 获取 MCP Server 的能力（tools/resources/prompts）
+ * body: { hostId?: string, ids?: string[], timeoutMs?: number }
+ */
+router.post('/capabilities', async (req: Request, res: Response) => {
+  try {
+    const { hostId, ids, timeoutMs } = req.body ?? {};
+    const hosts = await configService.getHosts();
+    const targetHostId = hostId || hosts.find(h => h.active)?.id;
+
+    if (!targetHostId) {
+      return res.status(400).json({ success: false, error: 'No target host specified' });
+    }
+
+    const host = hosts.find(h => h.id === targetHostId);
+    const config = await configService.readConfig(targetHostId);
+    const allIds = Object.keys(config.mcpServers);
+    const selectedIds = Array.isArray(ids) && ids.length > 0
+      ? ids.filter((x: any) => typeof x === 'string')
+      : allIds;
+
+    const effectiveTimeoutMs = typeof timeoutMs === 'number' && Number.isFinite(timeoutMs)
+      ? Math.max(500, Math.min(60_000, Math.floor(timeoutMs)))
+      : 10_000;
+
+    const results = await getMcpCapabilitiesBatch(config.mcpServers, selectedIds, {
+      timeoutMs: effectiveTimeoutMs,
+      concurrency: 2
+    }, host?.scope === 'project' && host.projectPath ? { cwd: host.projectPath } : undefined);
+
+    res.json({
+      success: true,
+      data: {
+        hostId: targetHostId,
+        timeoutMs: effectiveTimeoutMs,
+        results
+      }
+    });
+  } catch (error) {
+    console.error('Failed to get MCP capabilities:', error);
     res.status(500).json({
       success: false,
       error: error instanceof Error ? error.message : 'Unknown error'
