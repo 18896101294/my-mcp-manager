@@ -1,12 +1,12 @@
-import { AppstoreOutlined, ClearOutlined, CopyOutlined, ImportOutlined, LinkOutlined } from '@ant-design/icons';
-import { Button, Card, Divider, Drawer, Input, List, Space, Switch, Tabs, Tag, Typography, message } from 'antd';
+import { AppstoreOutlined, ClearOutlined, CopyOutlined, ImportOutlined, LinkOutlined, StarFilled } from '@ant-design/icons';
+import { Button, Card, Divider, Drawer, Input, List, Space, Switch, Tabs, Tag, Tooltip, Typography, message } from 'antd';
 import { useMemo, useState } from 'react';
 import Editor from '@monaco-editor/react';
 import type { McpImportItem } from '../utils/mcpImport';
 import { parseMcpImportText } from '../utils/mcpImport';
 import { mcpApi } from '../services/api';
 
-const { Text, Link } = Typography;
+const { Text, Link, Paragraph } = Typography;
 
 type Marketplace = {
   id: string;
@@ -22,7 +22,10 @@ type Template = {
   description: string;
   tags: string[];
   json: any;
+  featured?: boolean;
 };
+
+export type MarketplaceTemplate = Template;
 
 const marketplaces: Marketplace[] = [
   {
@@ -55,7 +58,7 @@ const marketplaces: Marketplace[] = [
   }
 ];
 
-const templates: Template[] = [
+const builtinTemplates: Template[] = [
   {
     id: 'memory',
     name: 'Memory',
@@ -145,6 +148,7 @@ export type MarketplaceDrawerProps = {
   selectedHostId?: string;
   selectedHostName?: string;
   darkMode?: boolean;
+  featuredTemplates?: MarketplaceTemplate[];
 };
 
 const copyToClipboard = async (text: string) => {
@@ -169,16 +173,83 @@ export const MarketplaceDrawer: React.FC<MarketplaceDrawerProps> = ({
   onImported,
   selectedHostId,
   selectedHostName,
-  darkMode
+  darkMode,
+  featuredTemplates
 }) => {
   const [jsonText, setJsonText] = useState('');
   const [defaultId, setDefaultId] = useState('');
   const [upsert, setUpsert] = useState(true);
   const [importing, setImporting] = useState(false);
 
-  const targetLabel = selectedHostName ? `${selectedHostName}（${selectedHostId}）` : (selectedHostId || '未选择');
+  const targetHostLabel = selectedHostName ? `${selectedHostName}（${selectedHostId}）` : (selectedHostId || '未选择');
 
   const parsed = useMemo(() => parseMcpImportText(jsonText, defaultId.trim() || undefined), [jsonText, defaultId]);
+
+  const templates = useMemo(() => {
+    const featured = Array.isArray(featuredTemplates) ? featuredTemplates : [];
+    if (featured.length === 0) return builtinTemplates;
+    const seen = new Set<string>();
+    const out: Template[] = [];
+
+    for (const t of featured) {
+      if (!t?.id || typeof t.id !== 'string') continue;
+      if (seen.has(t.id)) continue;
+      seen.add(t.id);
+      out.push({ ...t, featured: true, tags: Array.from(new Set([...(t.tags ?? []), '加精'])) });
+    }
+
+    for (const t of builtinTemplates) {
+      if (!t?.id) continue;
+      if (seen.has(t.id)) continue;
+      seen.add(t.id);
+      out.push(t);
+    }
+
+    return out;
+  }, [featuredTemplates]);
+
+  const tagView = (tag: string) => {
+    const t = String(tag ?? '').trim();
+    const lower = t.toLowerCase();
+
+    // MCP transport types: keep consistent with MCP list.
+    if (lower === 'stdio') return { color: 'green', text: 'stdio' };
+    if (lower === 'sse') return { color: 'purple', text: 'sse' };
+    if (lower === 'http') return { color: 'orange', text: 'http' };
+    if (lower === 'url') return { color: 'orange', text: 'url' };
+
+    // Providers / config sources.
+    if (lower === 'claude' || lower === 'claude-code') return { color: 'blue', text: t };
+    if (lower === 'codex') return { color: 'cyan', text: 'codex' };
+    if (lower === 'cursor') return { color: 'geekblue', text: 'cursor' };
+    if (lower === 'vscode') return { color: 'purple', text: 'vscode' };
+    if (lower === 'copilot') return { color: 'magenta', text: 'copilot' };
+
+    // Template meta.
+    if (lower === 'local') return { color: 'geekblue', text: 'local' };
+    if (lower === 'official') return { color: 'blue', text: 'official' };
+    if (lower === 'smithery') return { color: 'gold', text: 'smithery' };
+    if (lower === 'remote') return { color: 'magenta', text: 'remote' };
+    if (t === '加精') return { color: 'gold', text: '' };
+
+    return { color: 'default', text: t || 'tag' };
+  };
+
+  const renderTag = (tag: string) => {
+    const view = tagView(tag);
+    if (tag === '加精') {
+      return (
+        <Tooltip key={tag} title="加精">
+          <Tag color={view.color as any} icon={<StarFilled />} />
+        </Tooltip>
+      );
+    }
+    return (
+      <Tag key={tag} color={view.color as any}>
+        {view.text}
+      </Tag>
+    );
+  };
 
   const importItems = async (items: McpImportItem[]) => {
     if (!selectedHostId) {
@@ -258,12 +329,23 @@ export const MarketplaceDrawer: React.FC<MarketplaceDrawerProps> = ({
             children: (
               <List
                 grid={{ gutter: 12, xs: 1, sm: 1, md: 2, lg: 2, xl: 2, xxl: 2 }}
+                className="marketTemplatesList"
                 dataSource={templates}
                 renderItem={(t) => (
                   <List.Item>
                     <Card
                       size="small"
-                      title={<Space>{t.name}{t.tags.map(tag => <Tag key={tag}>{tag}</Tag>)}</Space>}
+                      className="marketTemplateCard"
+                      title={
+                        <div className="marketTemplateTitle">
+                          <Tooltip title={t.name}>
+                            <span className="marketTemplateName">{t.name}</span>
+                          </Tooltip>
+                          <span className="marketTemplateTags">
+                            {t.tags.map(renderTag)}
+                          </span>
+                        </div>
+                      }
                       actions={[
                         <Button
                           key="copy"
@@ -295,9 +377,13 @@ export const MarketplaceDrawer: React.FC<MarketplaceDrawerProps> = ({
                         </Button>
                       ]}
                     >
-                      <Text type="secondary">{t.description}</Text>
-                      <Divider style={{ marginBlock: 12 }} />
-                      <Text type="secondary">目标配置源：</Text> <Text>{targetLabel}</Text>
+                      <Paragraph
+                        type="secondary"
+                        className="marketTemplateDesc"
+                        ellipsis={{ rows: 4, tooltip: t.description }}
+                      >
+                        {t.description}
+                      </Paragraph>
                     </Card>
                   </List.Item>
                 )}
@@ -335,7 +421,7 @@ export const MarketplaceDrawer: React.FC<MarketplaceDrawerProps> = ({
             children: (
               <Space direction="vertical" style={{ width: '100%' }} size={12}>
                 <Text type="secondary">
-                  从插件市场复制 JSON 后粘贴到这里，然后导入到当前配置源：<Text strong>{targetLabel}</Text>
+                  从插件市场复制 JSON 后粘贴到这里，然后导入到当前配置源：<Text strong>{targetHostLabel}</Text>
                 </Text>
 
                 <Space wrap align="center">

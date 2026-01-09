@@ -4,7 +4,7 @@ import { AppstoreOutlined, CheckCircleOutlined, CheckSquareOutlined, ClearOutlin
 import Editor from '@monaco-editor/react';
 import { mcpApi } from './services/api';
 import { MCPForm } from './components/MCPForm';
-import { MarketplaceDrawer } from './components/MarketplaceDrawer';
+import { MarketplaceDrawer, type MarketplaceTemplate } from './components/MarketplaceDrawer';
 import './App.css';
 
 const { Title, Text } = Typography;
@@ -29,6 +29,7 @@ type McpCapabilitiesResult =
 
 type McpCapabilitiesCacheEntry = { cachedAt: number; ttlMs?: number; result: McpCapabilitiesResult };
 type McpCapabilitiesCacheMeta = { cachedAt: number; ttlMs: number; hit?: boolean };
+type FeaturedTemplateEntry = MarketplaceTemplate & { addedAt: number };
 
 interface HostInfo {
   id: string;
@@ -80,6 +81,28 @@ function App() {
   const [rowProgress, setRowProgress] = useState<Record<string, number>>({});
   const progressTimersRef = useRef<Map<string, number>>(new Map());
   const [marketOpen, setMarketOpen] = useState(false);
+  const [featuredTemplates, setFeaturedTemplates] = useState<FeaturedTemplateEntry[]>(() => {
+    try {
+      const raw = localStorage.getItem('mcp.marketplaceFeaturedTemplates:v1');
+      const parsed = raw ? JSON.parse(raw) : [];
+      if (!Array.isArray(parsed)) return [];
+      return parsed
+        .filter((t: any) => t && typeof t === 'object')
+        .map((t: any) => ({
+          id: String(t.id ?? ''),
+          name: String(t.name ?? t.id ?? ''),
+          description: typeof t.description === 'string' ? t.description : '',
+          tags: Array.isArray(t.tags) ? t.tags.map((x: any) => String(x)).filter(Boolean) : [],
+          json: t.json,
+          addedAt: Number(t.addedAt ?? 0)
+        }))
+        .filter((t: FeaturedTemplateEntry) => !!t.id && !!t.json && Number.isFinite(t.addedAt) && t.addedAt > 0)
+        .sort((a, b) => b.addedAt - a.addedAt)
+        .slice(0, 50);
+    } catch {
+      return [];
+    }
+  });
   const [showInherited, setShowInherited] = useState<boolean>(() => {
     try {
       const raw = localStorage.getItem('mcp.showInherited');
@@ -154,6 +177,8 @@ function App() {
   const configCardRef = useRef<HTMLDivElement | null>(null);
   const mcpListCardRef = useRef<HTMLDivElement | null>(null);
   const mcpCardRefs = useRef<Map<string, HTMLDivElement | null>>(new Map());
+
+  const featuredTemplateIds = useMemo(() => new Set(featuredTemplates.map(t => t.id)), [featuredTemplates]);
 
   // 表单状态
   const [formVisible, setFormVisible] = useState(false);
@@ -383,6 +408,14 @@ function App() {
       // ignore
     }
   }, [pinnedHostIds]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('mcp.marketplaceFeaturedTemplates:v1', JSON.stringify(featuredTemplates));
+    } catch {
+      // ignore
+    }
+  }, [featuredTemplates]);
 
   useEffect(() => {
     try {
@@ -629,6 +662,48 @@ function App() {
 
   const openBulkExport = async (title: string, rawText: string, redactedText: string, language: string) => {
     setBulkExport({ title, rawText, redactedText, language });
+  };
+
+  const buildFeaturedTemplate = (id: string, cfg: MCPServer, summaryText?: string): FeaturedTemplateEntry => {
+    const safeCfg = showSecrets ? cfg : redactConfig(cfg);
+    const hostLabel = toolLabel(selectedTool);
+
+    const descBase =
+      (summaryText && summaryText.trim())
+        ? summaryText.trim()
+        : cfg.url
+          ? `URL：${cfg.url}`
+          : cfg.command
+            ? `命令：${cfg.command}`
+            : '自定义 MCP';
+
+    const description = hostLabel ? `${descBase}（来自 ${hostLabel}）` : descBase;
+    const tags = Array.from(new Set([
+      ...(cfg.url ? ['url'] : ['stdio']),
+      ...(isCodexHost ? ['codex'] : []),
+      ...(isClaudeCodeHost ? ['claude'] : []),
+      'local'
+    ]));
+
+    return {
+      id,
+      name: id,
+      description,
+      tags,
+      json: { mcpServers: { [id]: safeCfg } },
+      addedAt: Date.now()
+    };
+  };
+
+  const featureMcpToMarketplace = (id: string, cfg: MCPServer, summaryText?: string) => {
+    const entry = buildFeaturedTemplate(id, cfg, summaryText);
+    setFeaturedTemplates(prev => [entry, ...prev.filter(t => t.id !== id)].slice(0, 50));
+    message.success('已加精：已加入精选模板');
+  };
+
+  const unfeatureMcpFromMarketplace = (id: string) => {
+    setFeaturedTemplates(prev => prev.filter(t => t.id !== id));
+    message.success('已取消加精');
   };
 
   const exportSelectedAsJson = async () => {
@@ -1454,7 +1529,6 @@ function App() {
       label: (
         <Space size={8}>
           <span>{toolLabel(toolId)}</span>
-          {active && <Tag color="green" style={{ marginInlineEnd: 0 }}>默认源</Tag>}
           <Tag color="blue" style={{ marginInlineEnd: 0 }}>用户 {detectedUserCount}</Tag>
           <Tag color="purple" style={{ marginInlineEnd: 0 }}>项目 {projectCount}</Tag>
         </Space>
@@ -1545,7 +1619,6 @@ function App() {
               ) : null}
               <Text strong>{highlightText(project || host.name, configSourceSearch)}</Text>
             </span>
-            {host.active && <Tag color="green" style={{ marginInlineEnd: 0 }}>默认源</Tag>}
           </Space>
         );
       }
@@ -1562,7 +1635,6 @@ function App() {
           </Tag>
           {pinned && <StarFilled style={{ color: '#faad14' }} />}
           <span>{host.name}</span>
-          {host.active && <Tag color="green" style={{ marginInlineEnd: 0 }}>默认源</Tag>}
         </Space>
       );
     };
@@ -1719,17 +1791,11 @@ function App() {
                       const claudeLabel = (
                         <Space size={6}>
                           <Text strong>Claude Code</Text>
-                          {!!claude?.active && <Tag color="green" style={{ marginInlineEnd: 0 }}>默认源</Tag>}
-                          <Tag color="blue" style={{ marginInlineEnd: 0 }}>用户 {claude?.detectedUserCount ?? 0}</Tag>
-                          <Tag color="purple" style={{ marginInlineEnd: 0 }}>项目 {claude?.projectCount ?? 0}</Tag>
                         </Space>
                       );
                       const codexLabel = (
                         <Space size={6}>
                           <Text strong>Codex</Text>
-                          {!!codex?.active && <Tag color="green" style={{ marginInlineEnd: 0 }}>默认源</Tag>}
-                          <Tag color="blue" style={{ marginInlineEnd: 0 }}>用户 {codex?.detectedUserCount ?? 0}</Tag>
-                          <Tag color="purple" style={{ marginInlineEnd: 0 }}>项目 {codex?.projectCount ?? 0}</Tag>
                         </Space>
                       );
 
@@ -1779,7 +1845,7 @@ function App() {
                               value={otherSelected || undefined}
                               placeholder="选择工具"
                               style={{ minWidth: 260, flex: 1 }}
-                              options={otherOptions}
+                              options={otherOptions.map(o => ({ value: o.value, label: toolLabel(o.value) }))}
                               onChange={(value) => setSelectedTool(value)}
                             />
                           )}
@@ -2079,6 +2145,23 @@ function App() {
                                   unCheckedChildren="禁用"
                                 />
                               )}
+                              <Tooltip title={featuredTemplateIds.has(name) ? '取消加精（从精选模板移除）' : '加精到精选模板'}>
+                                <Button
+                                  aria-label="feature"
+                                  type="text"
+                                  size="small"
+                                  icon={featuredTemplateIds.has(name) ? <StarFilled style={{ color: '#faad14' }} /> : <StarOutlined />}
+                                  onClick={() => {
+                                    const baseCfg = servers[name] ?? config;
+                                    if (featuredTemplateIds.has(name)) {
+                                      unfeatureMcpFromMarketplace(name);
+                                      return;
+                                    }
+                                    const entry = summaryFor(summaryHostId, name, baseCfg);
+                                    featureMcpToMarketplace(name, baseCfg, entry?.text);
+                                  }}
+                                />
+                              </Tooltip>
                               <Tooltip title="查看详情">
                                 <Button
                                   aria-label="view-details"
@@ -2116,6 +2199,10 @@ function App() {
                                 trigger={['click']}
                                 menu={{
                                   items: [
+                                    ...(featuredTemplateIds.has(name)
+                                      ? [{ key: 'unfeature', label: '取消加精（从精选模板移除）', icon: <StarFilled style={{ color: '#faad14' }} /> }]
+                                      : [{ key: 'feature', label: '加精到精选模板', icon: <StarOutlined /> }]),
+                                    { type: 'divider' as any },
                                     { key: 'check', label: '检测可用性', icon: <CheckCircleOutlined /> },
                                     ...(canViewScript(config) ? [{ key: 'viewScript', label: '查看脚本', icon: <FileTextOutlined /> }] : []),
                                     ...((isCodexHost || isClaudeCodeHost)
@@ -2123,6 +2210,16 @@ function App() {
                                       : [])
                                   ],
                                   onClick: async ({ key }) => {
+                                    if (key === 'feature') {
+                                      const baseCfg = servers[name] ?? config;
+                                      const entry = summaryFor(summaryHostId, name, baseCfg);
+                                      featureMcpToMarketplace(name, baseCfg, entry?.text);
+                                      return;
+                                    }
+                                    if (key === 'unfeature') {
+                                      unfeatureMcpFromMarketplace(name);
+                                      return;
+                                    }
                                     if (key === 'check') {
                                       await checkServers([name]);
                                       return;
@@ -2693,6 +2790,7 @@ function App() {
 	            selectedHostId={selectedHost}
 	            selectedHostName={selectedHostInfo?.name}
 	            darkMode={darkMode}
+              featuredTemplates={featuredTemplates.map(({ addedAt, ...t }) => t)}
 	          />
         </div>
       </Content>
