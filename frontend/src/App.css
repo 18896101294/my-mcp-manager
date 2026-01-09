@@ -221,6 +221,43 @@ body.dark .iconToggleSecretsRedacted {
   padding-inline: 2px;
 }
 
+/* Capabilities (Tools) header: keep name single-line; description ellipsis within row */
+.capToolsCollapse .ant-collapse-header {
+  overflow: hidden;
+}
+
+.capToolsCollapse .ant-collapse-header-text {
+  min-width: 0;
+  overflow: hidden;
+}
+
+.capToolsCollapse .ant-collapse-expand-icon {
+  flex: none;
+}
+
+.capToolHeader {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+  width: 100%;
+  overflow: hidden;
+}
+
+.capToolName {
+  white-space: nowrap;
+  flex: none;
+}
+
+.capToolDesc {
+  min-width: 0;
+  flex: 1;
+  display: block !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+}
+
 .outlinePanel {
   width: 300px;
 }

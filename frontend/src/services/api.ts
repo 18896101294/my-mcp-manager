@@ -39,8 +39,12 @@ export const mcpApi = {
     api.post('/mcp/check', { ids, hostId, timeoutMs }, signal ? { signal } : undefined),
 
   // 获取能力（tools/resources/prompts）
-  capabilities: (ids?: string[], hostId?: string, timeoutMs?: number) =>
-    api.post('/mcp/capabilities', { ids, hostId, timeoutMs }),
+  capabilities: (ids?: string[], hostId?: string, timeoutMs?: number, options?: { force?: boolean; noCache?: boolean }) =>
+    api.post('/mcp/capabilities', { ids, hostId, timeoutMs, force: !!options?.force, noCache: !!options?.noCache }),
+
+  // 读取 host 的配置文件内容（支持可选脱敏）
+  hostConfigFile: (hostId: string) =>
+    api.get('/mcp/host-config-file', { params: { hostId } }),
 
   // 生成 AI 简介
   aiSummary: (id: string, hostId?: string, timeoutMs?: number, model?: string, signal?: AbortSignal) => {

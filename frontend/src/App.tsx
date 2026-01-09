@@ -27,6 +27,9 @@ type McpCapabilitiesResult =
   | { ok: true; latencyMs: number; supported: { tools: boolean; resources: boolean; prompts: boolean }; capabilities: McpCapabilities }
   | { ok: false; latencyMs: number; error: string };
 
+type McpCapabilitiesCacheEntry = { cachedAt: number; ttlMs?: number; result: McpCapabilitiesResult };
+type McpCapabilitiesCacheMeta = { cachedAt: number; ttlMs: number; hit?: boolean };
+
 interface HostInfo {
   id: string;
   name: string;
@@ -132,8 +135,11 @@ function App() {
   const skipNextSummaryAutosaveRef = useRef<boolean>(false);
   const [detailsTab, setDetailsTab] = useState<'config' | 'capabilities'>('config');
   const [capabilitiesByKey, setCapabilitiesByKey] = useState<Record<string, McpCapabilitiesResult>>(() => ({}));
+  const [capabilitiesCacheMetaByKey, setCapabilitiesCacheMetaByKey] = useState<Record<string, McpCapabilitiesCacheMeta>>(() => ({}));
   const [capabilitiesLoadingKey, setCapabilitiesLoadingKey] = useState<string>('');
   const [aiSummaryLoading, setAiSummaryLoading] = useState(false);
+  const [hostConfigFileView, setHostConfigFileView] = useState<{ hostId: string; path: string; language: string; content: string } | null>(null);
+  const [hostConfigFileLoading, setHostConfigFileLoading] = useState(false);
   const [scriptView, setScriptView] = useState<{
     id: string;
     scriptPath: string;
@@ -156,6 +162,8 @@ function App() {
 
   const lastUsedStorageKey = useMemo(() => `mcp.serverLastUsedAt:${selectedHost || 'none'}`, [selectedHost]);
   const summariesStorageKeyFor = (hostId: string) => `mcp.serverSummaries:${hostId || 'none'}`;
+  const capabilitiesCacheStorageKeyFor = (hostId: string) => `mcp.capabilitiesCache:v1:${hostId || 'none'}`;
+  const capabilitiesCacheOkTtlMs = 7 * 24 * 60 * 60 * 1000;
 
   useEffect(() => {
     const t = window.setInterval(() => setNowTs(Date.now()), 30_000);
@@ -207,9 +215,108 @@ function App() {
     setSummariesByHost(prev => ({ ...prev, [hostId]: next }));
   };
 
+  const readCapabilitiesCacheFromStorage = (hostId: string): Record<string, McpCapabilitiesCacheEntry> => {
+    try {
+      const raw = localStorage.getItem(capabilitiesCacheStorageKeyFor(hostId));
+      const parsed = raw ? JSON.parse(raw) : {};
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+
+      const now = Date.now();
+      const next: Record<string, McpCapabilitiesCacheEntry> = {};
+
+      for (const [id, v] of Object.entries(parsed as any)) {
+        if (!v || typeof v !== 'object') continue;
+        const cachedAt = Number((v as any).cachedAt ?? 0);
+        const ttlMs = Number((v as any).ttlMs ?? 0);
+        const result = (v as any).result as McpCapabilitiesResult | undefined;
+        if (!Number.isFinite(cachedAt) || cachedAt <= 0) continue;
+        if (!result || typeof result !== 'object') continue;
+        const ok = (result as any).ok === true;
+        if (!ok) continue; // do not cache failures
+        const ttl = Number.isFinite(ttlMs) && ttlMs > 0 ? ttlMs : capabilitiesCacheOkTtlMs;
+        if (now - cachedAt > ttl) continue;
+        next[id] = { cachedAt, ttlMs: ttl, result };
+      }
+
+      return next;
+    } catch {
+      return {};
+    }
+  };
+
+  const saveCapabilitiesCacheToStorage = (hostId: string, cache: Record<string, McpCapabilitiesCacheEntry>) => {
+    try {
+      localStorage.setItem(capabilitiesCacheStorageKeyFor(hostId), JSON.stringify(cache));
+    } catch {
+      // ignore (quota etc.)
+    }
+  };
+
+  const storableCapabilitiesResult = (result: McpCapabilitiesResult): McpCapabilitiesResult => {
+    if (!result.ok) return result;
+    const tools = Array.isArray(result.capabilities?.tools) ? result.capabilities.tools : [];
+    const resources = Array.isArray(result.capabilities?.resources) ? result.capabilities.resources : [];
+    const prompts = Array.isArray(result.capabilities?.prompts) ? result.capabilities.prompts : [];
+
+    const base: McpCapabilitiesResult = {
+      ...result,
+      capabilities: {
+        tools: tools.slice(0, 200),
+        resources,
+        prompts
+      }
+    };
+
+    try {
+      const raw = JSON.stringify(base);
+      if (raw.length <= 700_000) return base;
+    } catch {
+      // ignore
+    }
+
+    // Fallback: drop inputSchema to reduce size.
+    return {
+      ...result,
+      capabilities: {
+        tools: tools.slice(0, 200).map(t => ({ name: t.name, description: t.description })),
+        resources: [],
+        prompts: []
+      }
+    };
+  };
+
+  const loadCapabilitiesCacheForHost = (hostId: string) => {
+    if (!hostId) return;
+    const cache = readCapabilitiesCacheFromStorage(hostId);
+    const entries = Object.entries(cache);
+    if (entries.length === 0) return;
+
+    setCapabilitiesByKey(prev => {
+      const next = { ...prev };
+      for (const [id, entry] of entries) {
+        next[`${hostId}:${id}`] = entry.result;
+      }
+      return next;
+    });
+
+    setCapabilitiesCacheMetaByKey(prev => {
+      const next = { ...prev };
+      for (const [id, entry] of entries) {
+        const ttlMs = Number(entry.ttlMs ?? capabilitiesCacheOkTtlMs);
+        next[`${hostId}:${id}`] = { cachedAt: entry.cachedAt, ttlMs };
+      }
+      return next;
+    });
+  };
+
   useEffect(() => {
     if (!selectedHost) return;
     loadSummariesForHost(selectedHost);
+  }, [selectedHost]);
+
+  useEffect(() => {
+    if (!selectedHost) return;
+    loadCapabilitiesCacheForHost(selectedHost);
   }, [selectedHost]);
 
   useEffect(() => {
@@ -894,30 +1001,39 @@ function App() {
   };
 
   const detailsCapabilitiesKey = useMemo(() => {
-    if (!details || !selectedHost) return '';
-    return `${selectedHost}:${details.id}`;
-  }, [details?.id, selectedHost]);
+    if (!details) return '';
+    return `${details.summaryHostId}:${details.id}`;
+  }, [details?.id, details?.summaryHostId]);
 
   const detailsCapabilities = detailsCapabilitiesKey ? capabilitiesByKey[detailsCapabilitiesKey] : undefined;
   const detailsCapabilitiesLoading = detailsCapabilitiesKey && capabilitiesLoadingKey === detailsCapabilitiesKey;
 
-  const fetchDetailsCapabilities = async () => {
+  const fetchDetailsCapabilities = async (opts?: { force?: boolean }) => {
     if (!details) return;
-    if (!selectedHost) {
+    const hostId = details.summaryHostId;
+    if (!hostId || hostId === 'none') {
       message.warning('请先选择配置源');
       return;
     }
-
-    const key = `${selectedHost}:${details.id}`;
+    const key = `${hostId}:${details.id}`;
     try {
       setCapabilitiesLoadingKey(key);
-      const resp = await mcpApi.capabilities([details.id], selectedHost, 10_000);
+      const resp = await mcpApi.capabilities([details.id], hostId, 10_000, { force: !!opts?.force });
       if (!resp.data?.success) {
         message.error(resp.data?.error || '获取能力失败');
         return;
       }
 
       const result = resp.data?.data?.results?.[details.id] as McpCapabilitiesResult | undefined;
+      const cacheMetaRaw = resp.data?.data?.cache?.[details.id] as any;
+      const cacheMeta: McpCapabilitiesCacheMeta | null =
+        cacheMetaRaw && typeof cacheMetaRaw === 'object'
+          ? {
+            cachedAt: Number(cacheMetaRaw.cachedAt ?? 0),
+            ttlMs: Number(cacheMetaRaw.ttlMs ?? 0),
+            hit: !!cacheMetaRaw.hit
+          }
+          : null;
       if (!result) {
         message.error('未返回能力数据');
         return;
@@ -925,6 +1041,19 @@ function App() {
 
       setCapabilitiesByKey(prev => ({ ...prev, [key]: result }));
       if (!result.ok) message.warning(`获取失败：${result.error}`);
+
+      if (result.ok) {
+        const existing = readCapabilitiesCacheFromStorage(hostId);
+        const cachedAt = cacheMeta && Number.isFinite(cacheMeta.cachedAt) && cacheMeta.cachedAt > 0 ? cacheMeta.cachedAt : Date.now();
+        const ttlMs = cacheMeta && Number.isFinite(cacheMeta.ttlMs) && cacheMeta.ttlMs > 0 ? cacheMeta.ttlMs : capabilitiesCacheOkTtlMs;
+        existing[details.id] = { cachedAt, ttlMs, result: storableCapabilitiesResult(result) };
+        saveCapabilitiesCacheToStorage(hostId, existing);
+
+        setCapabilitiesCacheMetaByKey(prev => ({
+          ...prev,
+          [key]: { cachedAt, ttlMs, hit: cacheMeta?.hit }
+        }));
+      }
     } catch (e: any) {
       message.error(e?.response?.data?.error || '获取能力失败');
     } finally {
@@ -932,16 +1061,23 @@ function App() {
     }
   };
 
+  const formatDateTime = (ts: number) => {
+    const d = new Date(ts);
+    const pad2 = (n: number) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())} ${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}`;
+  };
+
   const generateAiSummaryForDetails = async () => {
     if (!details) return;
-    if (!selectedHost) {
+    const hostId = details.summaryHostId;
+    if (!hostId || hostId === 'none') {
       message.warning('请先选择配置源');
       return;
     }
 
     try {
       setAiSummaryLoading(true);
-      const resp = await mcpApi.aiSummary(details.id, selectedHost, 60_000);
+      const resp = await mcpApi.aiSummary(details.id, hostId, 60_000);
       if (!resp.data?.success) {
         message.error(resp.data?.error || '生成 AI 简介失败');
         return;
@@ -1054,6 +1190,32 @@ function App() {
       message.error(String(err));
     } finally {
       setScriptLoading(false);
+    }
+  };
+
+  const viewSelectedHostConfigFile = async () => {
+    if (!selectedHostInfo?.id) {
+      message.warning('请先选择配置源');
+      return;
+    }
+
+    try {
+      setHostConfigFileView({ hostId: selectedHostInfo.id, path: selectedHostInfo.configPath, language: 'text', content: '' });
+      setHostConfigFileLoading(true);
+      const resp = await mcpApi.hostConfigFile(selectedHostInfo.id);
+      const data = resp.data?.data;
+      setHostConfigFileView({
+        hostId: selectedHostInfo.id,
+        path: String(data?.path ?? selectedHostInfo.configPath),
+        language: String(data?.language ?? 'text'),
+        content: String(data?.content ?? '')
+      });
+    } catch (e: any) {
+      setHostConfigFileView(null);
+      const err = e?.response?.data?.error || e?.message || '读取配置文件失败';
+      message.error(String(err));
+    } finally {
+      setHostConfigFileLoading(false);
     }
   };
 
@@ -1175,6 +1337,10 @@ function App() {
 
   useEffect(() => {
     if (isClaudeCodeProjectHost) loadSummariesForHost('claude-code');
+  }, [isClaudeCodeProjectHost, selectedHost]);
+
+  useEffect(() => {
+    if (isClaudeCodeProjectHost) loadCapabilitiesCacheForHost('claude-code');
   }, [isClaudeCodeProjectHost, selectedHost]);
 
   // Auto-save summary on change (debounced).
@@ -1667,15 +1833,26 @@ function App() {
                     </Tooltip>
                   </div>
 
-                  <div className="hostMeta">
-                    <Text type="secondary">
-                      当前查看：{selectedHostInfo?.name || '未选择'}
-                      {selectedHostInfo?.projectPath ? `（${selectedHostInfo.projectPath}）` : ''}
-                    </Text>
-                    <Text type="secondary">
-                      当前配置文件：{selectedHostInfo?.configPath || '-'}
-                    </Text>
-                  </div>
+	                  <div className="hostMeta">
+	                    <Text type="secondary">
+	                      当前查看：{selectedHostInfo?.name || '未选择'}
+	                      {selectedHostInfo?.projectPath ? `（${selectedHostInfo.projectPath}）` : ''}
+	                    </Text>
+	                    <Text type="secondary">
+	                      当前配置文件：
+                        {selectedHostInfo?.configPath ? (
+                          <Typography.Link
+                            onClick={viewSelectedHostConfigFile}
+                            style={{ marginInlineStart: 6 }}
+                            title={selectedHostInfo.configPath}
+                          >
+                            {selectedHostInfo.configPath}
+                          </Typography.Link>
+                        ) : (
+                          ' -'
+                        )}
+	                    </Text>
+	                  </div>
                 </Space>
               </Card>
               </div>
@@ -2222,12 +2399,37 @@ function App() {
                             <Space wrap size={6}>
                               <Button
                                 icon={<PlayCircleOutlined />}
-                                onClick={fetchDetailsCapabilities}
+                                onClick={() => fetchDetailsCapabilities()}
                                 loading={!!detailsCapabilitiesLoading}
                                 disabled={!selectedHost}
                               >
                                 发现功能
                               </Button>
+                              <Tooltip
+                                title={(() => {
+                                  const base = '忽略缓存，重新发现并刷新后端缓存';
+                                  const meta = detailsCapabilitiesKey ? capabilitiesCacheMetaByKey[detailsCapabilitiesKey] : undefined;
+                                  if (!meta || !Number.isFinite(meta.cachedAt) || !Number.isFinite(meta.ttlMs) || meta.cachedAt <= 0 || meta.ttlMs <= 0) {
+                                    return base;
+                                  }
+                                  const expiresAt = meta.cachedAt + meta.ttlMs;
+                                  return (
+                                    <Space direction="vertical" size={2}>
+                                      <div>{base}</div>
+                                      <div>{`过期时间: ${formatDateTime(expiresAt)}`}</div>
+                                    </Space>
+                                  );
+                                })()}
+                              >
+                                <Button
+                                  icon={<ReloadOutlined />}
+                                  onClick={() => fetchDetailsCapabilities({ force: true })}
+                                  loading={!!detailsCapabilitiesLoading}
+                                  disabled={!selectedHost}
+                                >
+                                  强制刷新
+                                </Button>
+                              </Tooltip>
                               <Button
                                 icon={<CopyOutlined />}
                                 disabled={!detailsCapabilities || !detailsCapabilities.ok}
@@ -2265,17 +2467,22 @@ function App() {
                                       ) : (
                                         <Collapse
                                           size="small"
+                                          className="capToolsCollapse"
                                           items={detailsCapabilities.capabilities.tools.map((t, idx) => ({
                                             key: `${idx}:${t.name}`,
                                             label: (
-                                              <Space size={8} style={{ minWidth: 0 }}>
-                                                <Text strong>{t.name}</Text>
+                                              <div className="capToolHeader">
+                                                <Text strong className="capToolName">
+                                                  {t.name}
+                                                </Text>
                                                 {t.description ? (
-                                                  <Text type="secondary" ellipsis={{ tooltip: t.description }} style={{ maxWidth: 520 }}>
-                                                    {t.description}
-                                                  </Text>
+                                                  <Tooltip title={t.description}>
+                                                    <span className="capToolDesc ant-typography ant-typography-secondary">
+                                                      {t.description}
+                                                    </span>
+                                                  </Tooltip>
                                                 ) : null}
-                                              </Space>
+                                              </div>
                                             ),
                                             children: (
                                               <Space direction="vertical" size={8} style={{ width: '100%' }}>
@@ -2385,9 +2592,9 @@ function App() {
             )}
           </Drawer>
 
-          <Drawer
-            title={
-              scriptView
+	          <Drawer
+	            title={
+	              scriptView
                 ? (
                   <Space size={8} style={{ minWidth: 0 }}>
                     <FileTextOutlined />
@@ -2408,39 +2615,91 @@ function App() {
             width={820}
             onClose={() => setScriptView(null)}
           >
-            {scriptView && (
-              <>
-                <Text type="secondary" style={{ display: 'block', marginBottom: 6 }}>
-                  路径：{scriptView.scriptPath || '-'}
-                </Text>
-                <div style={{ border: '1px solid rgba(5, 5, 5, 0.12)', borderRadius: 8, overflow: 'hidden', height: '70vh' }}>
-                  {scriptLoading ? (
-                    <div style={{ display: 'flex', justifyContent: 'center', paddingTop: 48 }}>
-                      <Spin tip="读取脚本中..." />
-                    </div>
-                  ) : (
-                    <Editor
-                      language={scriptView.language || 'text'}
-                      theme={darkMode ? 'vs-dark' : 'vs'}
-                      value={scriptView.content}
-                      options={{
-                        readOnly: true,
-                        minimap: { enabled: false },
-                        scrollBeyondLastLine: false,
-                        wordWrap: 'on',
-                        fontSize: 13,
-                        automaticLayout: true
-                      }}
-                    />
-                  )}
-                </div>
-              </>
-            )}
-          </Drawer>
+	            {scriptView && (
+	              <>
+	                <Text type="secondary" style={{ display: 'block', marginBottom: 6 }}>
+	                  路径：{scriptView.scriptPath || '-'}
+	                </Text>
+	                <div style={{ border: '1px solid rgba(5, 5, 5, 0.12)', borderRadius: 8, overflow: 'hidden', height: '70vh' }}>
+	                  {scriptLoading ? (
+	                    <div style={{ display: 'flex', justifyContent: 'center', paddingTop: 48 }}>
+	                      <Spin tip="读取脚本中..." />
+	                    </div>
+	                  ) : (
+	                    <Editor
+	                      language={scriptView.language || 'text'}
+	                      theme={darkMode ? 'vs-dark' : 'vs'}
+	                      value={scriptView.content}
+	                      options={{
+	                        readOnly: true,
+	                        minimap: { enabled: false },
+	                        scrollBeyondLastLine: false,
+	                        wordWrap: 'on',
+	                        fontSize: 13,
+	                        automaticLayout: true
+	                      }}
+	                    />
+	                  )}
+	                </div>
+	              </>
+	            )}
+	          </Drawer>
 
-          <MCPForm
-            visible={formVisible}
-            mode={formMode}
+            <Drawer
+              title={
+                hostConfigFileView
+                  ? (
+                    <Space size={8} style={{ minWidth: 0 }}>
+                      <FileTextOutlined />
+                      <Text strong ellipsis={{ tooltip: hostConfigFileView.path }} style={{ maxWidth: 640, fontSize: 18 }}>
+                        {hostConfigFileView.path.split('/').pop() ?? hostConfigFileView.path}
+                      </Text>
+                    </Space>
+                  )
+                  : (
+                    <Space size={8}>
+                      <FileTextOutlined />
+                      <span>配置文件</span>
+                    </Space>
+                  )
+              }
+              open={!!hostConfigFileView}
+              width={820}
+              onClose={() => setHostConfigFileView(null)}
+            >
+              {hostConfigFileView && (
+                <>
+                  <Text type="secondary" style={{ display: 'block', marginBottom: 6 }}>
+                    路径：{hostConfigFileView.path || '-'}
+                  </Text>
+                  <div style={{ border: '1px solid rgba(5, 5, 5, 0.12)', borderRadius: 8, overflow: 'hidden', height: '70vh' }}>
+                    {hostConfigFileLoading ? (
+                      <div style={{ display: 'flex', justifyContent: 'center', paddingTop: 48 }}>
+                        <Spin tip="读取配置文件中..." />
+                      </div>
+                    ) : (
+                      <Editor
+                        language={hostConfigFileView.language || 'text'}
+                        theme={darkMode ? 'vs-dark' : 'vs'}
+                        value={hostConfigFileView.content}
+                        options={{
+                          readOnly: true,
+                          minimap: { enabled: false },
+                          scrollBeyondLastLine: false,
+                          wordWrap: 'on',
+                          fontSize: 13,
+                          automaticLayout: true
+                        }}
+                      />
+                    )}
+                  </div>
+                </>
+              )}
+            </Drawer>
+
+	          <MCPForm
+	            visible={formVisible}
+	            mode={formMode}
             initialValues={editingMCP}
             selectedHost={selectedHost}
             darkMode={darkMode}

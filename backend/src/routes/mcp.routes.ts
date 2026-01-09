@@ -3,6 +3,8 @@ import { configService } from '../services/ConfigService.js';
 import { checkMcpServers } from '../services/McpCheckService.js';
 import { getMcpCapabilitiesBatch } from '../services/McpCapabilitiesService.js';
 import { generateAiSummary } from '../services/AiSummaryService.js';
+import { readHostConfigFile } from '../services/HostFileService.js';
+import { capabilitiesOkTtlMs, readCapabilitiesCacheEntry, writeCapabilitiesCache } from '../services/CapabilitiesCacheService.js';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
@@ -53,6 +55,39 @@ router.get('/', async (req: Request, res: Response) => {
     });
   } catch (error) {
     console.error('Failed to get MCP list:', error);
+    res.status(500).json({
+      success: false,
+      error: error instanceof Error ? error.message : 'Unknown error'
+    });
+  }
+});
+
+/**
+ * GET /api/mcp/host-config-file
+ * 获取指定 host 的配置文件原文（支持可选脱敏）
+ * query: { hostId: string, redact?: 'true'|'false' }
+ */
+router.get('/host-config-file', async (req: Request, res: Response) => {
+  try {
+    const { hostId } = req.query as any;
+    if (!hostId || typeof hostId !== 'string') {
+      return res.status(400).json({ success: false, error: 'Missing required query: hostId' });
+    }
+
+    const hosts = await configService.getHosts();
+    const host = hosts.find(h => h.id === hostId);
+    if (!host) {
+      return res.status(404).json({ success: false, error: `Host not found: ${hostId}` });
+    }
+
+    const file = await readHostConfigFile(host.configPath);
+
+    res.json({
+      success: true,
+      data: file
+    });
+  } catch (error) {
+    console.error('Failed to read host config file:', error);
     res.status(500).json({
       success: false,
       error: error instanceof Error ? error.message : 'Unknown error'
@@ -115,7 +150,7 @@ router.post('/check', async (req: Request, res: Response) => {
  */
 router.post('/capabilities', async (req: Request, res: Response) => {
   try {
-    const { hostId, ids, timeoutMs } = req.body ?? {};
+    const { hostId, ids, timeoutMs, force, noCache } = req.body ?? {};
     const hosts = await configService.getHosts();
     const targetHostId = hostId || hosts.find(h => h.active)?.id;
 
@@ -134,17 +169,56 @@ router.post('/capabilities', async (req: Request, res: Response) => {
       ? Math.max(500, Math.min(60_000, Math.floor(timeoutMs)))
       : 10_000;
 
-    const results = await getMcpCapabilitiesBatch(config.mcpServers, selectedIds, {
-      timeoutMs: effectiveTimeoutMs,
-      concurrency: 2
-    }, host?.scope === 'project' && host.projectPath ? { cwd: host.projectPath } : undefined);
+    const wantForce = !!force;
+    const wantNoCache = !!noCache;
+    const cachedResults: Record<string, any> = {};
+    const cache: Record<string, { hit: boolean; cachedAt: number; ttlMs: number } | null> = {};
+    const missing: string[] = [];
+
+    if (!wantForce && !wantNoCache) {
+      for (const id of selectedIds) {
+        // eslint-disable-next-line no-await-in-loop
+        const entry = await readCapabilitiesCacheEntry(targetHostId, id);
+        if (entry) {
+          cachedResults[id] = entry.result;
+          cache[id] = { hit: true, cachedAt: entry.cachedAt, ttlMs: entry.ttlMs };
+        } else {
+          missing.push(id);
+        }
+      }
+    } else {
+      missing.push(...selectedIds);
+    }
+
+    const fetchedResults = missing.length > 0
+      ? await getMcpCapabilitiesBatch(config.mcpServers, missing, {
+        timeoutMs: effectiveTimeoutMs,
+        concurrency: 2
+      }, host?.scope === 'project' && host.projectPath ? { cwd: host.projectPath } : undefined)
+      : {};
+
+    if (!wantNoCache) {
+      await Promise.all(
+        Object.entries(fetchedResults).map(([id, r]) => writeCapabilitiesCache(targetHostId, id, r as any))
+      );
+    }
+
+    const results = { ...cachedResults, ...fetchedResults };
+    const fetchedAt = Date.now();
+    for (const [id, r] of Object.entries(fetchedResults)) {
+      const ok = (r as any)?.ok === true;
+      if (!ok) continue;
+      if (wantNoCache) continue;
+      cache[id] = { hit: false, cachedAt: fetchedAt, ttlMs: capabilitiesOkTtlMs };
+    }
 
     res.json({
       success: true,
       data: {
         hostId: targetHostId,
         timeoutMs: effectiveTimeoutMs,
-        results
+        results,
+        cache
       }
     });
   } catch (error) {

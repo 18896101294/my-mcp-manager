@@ -19,4 +19,6 @@
 
 # app data / backups (may contain secrets)
 data/backups/
-
+data/logs/
+data/runtime-cache/
+data/.DS_Store
