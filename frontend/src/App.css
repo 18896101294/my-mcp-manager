@@ -190,6 +190,11 @@ body.dark .iconToggleSecretsRaw {
   margin-bottom: 12px;
 }
 
+.mcpList .ant-list-pagination {
+  display: flex;
+  justify-content: center;
+}
+
 .mcpCard {
   border-radius: 12px;
   transition: box-shadow 160ms ease, border-color 160ms ease, transform 160ms ease;
@@ -210,6 +215,8 @@ body.dark .iconToggleSecretsRaw {
 
 .mcpNameLink {
   cursor: pointer;
+  font-size: 16px;
+  font-weight: 600;
 }
 
 .mcpNameLink:hover {

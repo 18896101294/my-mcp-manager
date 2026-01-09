@@ -10,6 +10,8 @@ import './App.css';
 const { Title, Text } = Typography;
 const { Header, Content, Footer } = Layout;
 
+const MCP_PAGE_SIZE = 10;
+
 const toTildePath = (p?: string): string => {
   const raw = String(p ?? '').trim();
   if (!raw) return '';
@@ -75,6 +77,7 @@ function App() {
     }
   });
   const [query, setQuery] = useState('');
+  const [mcpPage, setMcpPage] = useState<number>(1);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
   const [enabledFilter, setEnabledFilter] = useState<'all' | 'enabled' | 'disabled'>('all');
   const [typeFilter, setTypeFilter] = useState<'all' | 'stdio' | 'sse' | 'http'>('all');
@@ -1733,6 +1736,17 @@ function App() {
     });
   }, [servers, query, enabledFilter, typeFilter, isClaudeCodeProjectHost, showInherited, serverMeta]);
 
+  // Reset pagination when filters change (avoid landing on empty pages).
+  useEffect(() => {
+    setMcpPage(1);
+  }, [query, enabledFilter, typeFilter, showInherited, selectedHost]);
+
+  // Clamp page when total changes.
+  useEffect(() => {
+    const maxPage = Math.max(1, Math.ceil(serverEntries.length / MCP_PAGE_SIZE));
+    setMcpPage(prev => Math.min(prev, maxPage));
+  }, [serverEntries.length]);
+
   useEffect(() => {
     const visible = new Set(serverEntries.map(([id]) => id));
     setSelectedIds(prev => {
@@ -2082,7 +2096,17 @@ function App() {
                   <Empty description={Object.keys(servers).length === 0 ? '暂无 MCP' : '无匹配结果'} />
                 ) : (
                   <List
+                    className="mcpList"
                     dataSource={serverEntries}
+                    rowKey={([name]) => name}
+                    pagination={{
+                      pageSize: MCP_PAGE_SIZE,
+                      current: mcpPage,
+                      total: serverEntries.length,
+                      onChange: (page) => setMcpPage(page),
+                      showSizeChanger: false,
+                      hideOnSinglePage: false
+                    }}
                     renderItem={([name, config]) => {
                       const origin = serverMeta?.[name]?.origin;
                       const isClaudeProject = selectedHostInfo?.id.startsWith('claude-code-project-');
