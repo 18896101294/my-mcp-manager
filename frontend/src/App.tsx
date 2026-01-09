@@ -627,19 +627,6 @@ function App() {
     });
   };
 
-  const copyRawWithConfirm = async (text: string) => {
-    Modal.confirm({
-      title: '复制原始内容（含敏感信息）',
-      content: '此内容可能包含环境变量/Token 等敏感信息，确认复制到剪贴板？',
-      okText: '确认复制',
-      cancelText: '取消',
-      okType: 'danger',
-      onOk: async () => {
-        await copyToClipboard(text);
-      }
-    });
-  };
-
   const openBulkExport = async (title: string, rawText: string, redactedText: string, language: string) => {
     setBulkExport({ title, rawText, redactedText, language });
   };
@@ -2324,7 +2311,7 @@ function App() {
                                       生成 AI 简介
                                     </Button>
                                   </Tooltip>
-	                                <Tooltip title="默认脱敏（env/headers）。如需原始内容请使用“显示敏感信息”或“复制原始 JSON”。">
+	                                <Tooltip title="默认脱敏（env/headers）。如需原始内容请先开启“显示敏感信息”。">
 	                                  <Button
 	                                    icon={<CopyOutlined />}
 	                                    onClick={() => {
@@ -2365,11 +2352,6 @@ function App() {
                                     复制安装命令
                                   </Button>
                                 )}
-                                <Tooltip title="复制原始 JSON（包含敏感信息）">
-                                  <Button danger icon={<CopyOutlined />} onClick={() => copyRawWithConfirm(toJson(details.config))}>
-                                    复制原始 JSON
-                                  </Button>
-                                </Tooltip>
                               </Space>
                             </div>
 
@@ -2565,9 +2547,6 @@ function App() {
                       {showSecrets ? <UnlockOutlined /> : <LockOutlined />}
                     </Space>
                   </Button>
-                  <Tooltip title="复制原始内容（包含敏感信息）">
-                    <Button danger icon={<CopyOutlined />} onClick={() => copyRawWithConfirm(bulkExport.rawText)}>复制原始</Button>
-                  </Tooltip>
                   <Button type="primary" icon={<CloseOutlined />} onClick={() => setBulkExport(null)}>关闭</Button>
                 </Space>
               ) : null
