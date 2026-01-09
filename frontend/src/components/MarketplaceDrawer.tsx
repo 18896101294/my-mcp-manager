@@ -1,5 +1,5 @@
 import { AppstoreOutlined, ClearOutlined, CopyOutlined, ImportOutlined, LinkOutlined, StarFilled } from '@ant-design/icons';
-import { Button, Card, Divider, Drawer, Input, List, Space, Switch, Tabs, Tag, Tooltip, Typography, message } from 'antd';
+import { Button, Card, Drawer, Input, List, Space, Switch, Tabs, Tag, Tooltip, Typography, message } from 'antd';
 import { useMemo, useState } from 'react';
 import Editor from '@monaco-editor/react';
 import type { McpImportItem } from '../utils/mcpImport';

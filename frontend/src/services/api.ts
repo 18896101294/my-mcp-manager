@@ -46,6 +46,10 @@ export const mcpApi = {
   hostConfigFile: (hostId: string) =>
     api.get('/mcp/host-config-file', { params: { hostId } }),
 
+  // 打开项目目录（仅 project host）
+  openProjectFolder: (hostId: string) =>
+    api.post('/mcp/open-project-folder', { hostId }),
+
   // 生成 AI 简介
   aiSummary: (id: string, hostId?: string, timeoutMs?: number, model?: string, signal?: AbortSignal) => {
     const effectiveTimeoutMs = typeof timeoutMs === 'number' && Number.isFinite(timeoutMs) ? timeoutMs : 60_000;

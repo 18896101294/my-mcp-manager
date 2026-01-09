@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState, useEffect } from 'react';
 import { Alert, Button, Card, Checkbox, Collapse, ConfigProvider, Drawer, Dropdown, Empty, FloatButton, Input, Layout, List, message, Modal, Popover, Progress, Segmented, Select, Space, Spin, Switch, Tabs, Tag, Tooltip, Typography, theme as antdTheme } from 'antd';
-import { AppstoreOutlined, CheckCircleOutlined, CheckSquareOutlined, ClearOutlined, ClockCircleOutlined, CloseCircleOutlined, CloseOutlined, CopyOutlined, DeleteOutlined, DownloadOutlined, EditOutlined, ExportOutlined, FileTextOutlined, LockOutlined, MoreOutlined, MoonFilled, OrderedListOutlined, PlayCircleOutlined, PlusOutlined, ProfileOutlined, RedoOutlined, ReloadOutlined, RobotOutlined, SearchOutlined, StarFilled, StarOutlined, StopOutlined, SunFilled, UnlockOutlined, UpOutlined } from '@ant-design/icons';
+import { AppstoreOutlined, CheckCircleOutlined, CheckSquareOutlined, ClearOutlined, ClockCircleOutlined, CloseCircleOutlined, CloseOutlined, CopyOutlined, DeleteOutlined, DownloadOutlined, EditOutlined, ExportOutlined, FileTextOutlined, FolderOpenOutlined, LockOutlined, MoreOutlined, MoonFilled, OrderedListOutlined, PlayCircleOutlined, PlusOutlined, ProfileOutlined, RedoOutlined, ReloadOutlined, RobotOutlined, SearchOutlined, SettingOutlined, StarFilled, StarOutlined, StopOutlined, SunFilled, UnlockOutlined, UpOutlined } from '@ant-design/icons';
 import Editor from '@monaco-editor/react';
 import { mcpApi } from './services/api';
 import { MCPForm } from './components/MCPForm';
@@ -9,6 +9,16 @@ import './App.css';
 
 const { Title, Text } = Typography;
 const { Header, Content, Footer } = Layout;
+
+const toTildePath = (p?: string): string => {
+  const raw = String(p ?? '').trim();
+  if (!raw) return '';
+  if (raw.startsWith('~/')) return raw;
+  if (/^\/Users\/[^/]+\//.test(raw)) return raw.replace(/^\/Users\/[^/]+\//, '~/');
+  if (/^\/home\/[^/]+\//.test(raw)) return raw.replace(/^\/home\/[^/]+\//, '~/');
+  if (/^[A-Za-z]:\\Users\\[^\\]+\\/.test(raw)) return raw.replace(/^[A-Za-z]:\\Users\\[^\\]+\\/, '~\\');
+  return raw;
+};
 
 interface MCPServer {
   command?: string;
@@ -1281,6 +1291,24 @@ function App() {
     }
   };
 
+  const openSelectedHostProjectFolder = async () => {
+    if (!selectedHostInfo?.id) {
+      message.warning('请先选择配置源');
+      return;
+    }
+    if (selectedHostInfo.scope !== 'project' || !selectedHostInfo.projectPath) {
+      message.warning('当前配置源不是项目级，无法打开文件夹');
+      return;
+    }
+
+    try {
+      await mcpApi.openProjectFolder(selectedHostInfo.id);
+    } catch (e: any) {
+      const err = e?.response?.data?.error || e?.message || '打开文件夹失败';
+      message.error(String(err));
+    }
+  };
+
   const inferSummary = (id: string, cfg: MCPServer): string => {
     try {
       if (cfg.url) {
@@ -1524,7 +1552,7 @@ function App() {
       ? sorted.filter(x => x.toolId === selectedTool || x.detectedUserCount > 0 || x.projectCount > 0)
       : sorted;
 
-    return filtered.map(({ toolId, projectCount, detectedUserCount, active }) => ({
+    return filtered.map(({ toolId, projectCount, detectedUserCount }) => ({
       value: toolId,
       label: (
         <Space size={8}>
@@ -1784,8 +1812,6 @@ function App() {
                 <Space direction="vertical" size={12} style={{ width: '100%' }}>
                   <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
                     {(() => {
-                      const claude = toolStats.get('claude-code');
-                      const codex = toolStats.get('codex');
                       const activeKey = (selectedTool === 'claude-code' || selectedTool === 'codex') ? selectedTool : 'other';
 
                       const claudeLabel = (
@@ -1887,24 +1913,62 @@ function App() {
                   </div>
 
 	                  <div className="hostMeta">
-	                    <Text type="secondary">
-	                      当前查看：{selectedHostInfo?.name || '未选择'}
-	                      {selectedHostInfo?.projectPath ? `（${selectedHostInfo.projectPath}）` : ''}
-	                    </Text>
-	                    <Text type="secondary">
-	                      当前配置文件：
-                        {selectedHostInfo?.configPath ? (
-                          <Typography.Link
+                      {selectedHostInfo?.scope === 'project' && selectedHostInfo?.projectPath ? (
+                        <Tooltip title="点击打开项目文件夹">
+                          <Text
+                            type="secondary"
+                            className="hostMetaItem hostMetaItemWrap hostMetaClickable"
+                            role="button"
+                            tabIndex={0}
+                            onClick={openSelectedHostProjectFolder}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter' || e.key === ' ') {
+                                e.preventDefault();
+                                openSelectedHostProjectFolder();
+                              }
+                            }}
+                          >
+                            <FolderOpenOutlined />
+                            <span className="hostMetaText hostMetaTextWrap">
+                              {toTildePath(selectedHostInfo.projectPath)}
+                            </span>
+                          </Text>
+                        </Tooltip>
+                      ) : (
+                        <Text type="secondary" className="hostMetaItem hostMetaItemWrap">
+                          <FolderOpenOutlined />
+                          <span className="hostMetaText hostMetaTextWrap">
+                            {selectedHostInfo?.name || '未选择'}
+                          </span>
+                        </Text>
+                      )}
+
+                      {selectedHostInfo?.configPath ? (
+                        <Tooltip title="点击查看配置文件">
+                          <Text
+                            type="secondary"
+                            className="hostMetaItem hostMetaItemWrap hostMetaClickable"
+                            role="button"
+                            tabIndex={0}
                             onClick={viewSelectedHostConfigFile}
-                            style={{ marginInlineStart: 6 }}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter' || e.key === ' ') {
+                                e.preventDefault();
+                                viewSelectedHostConfigFile();
+                              }
+                            }}
                             title={selectedHostInfo.configPath}
                           >
-                            {selectedHostInfo.configPath}
-                          </Typography.Link>
-                        ) : (
-                          ' -'
-                        )}
-	                    </Text>
+                            <SettingOutlined />
+                            <span className="hostMetaText hostMetaTextWrap">{toTildePath(selectedHostInfo.configPath)}</span>
+                          </Text>
+                        </Tooltip>
+                      ) : (
+                        <Text type="secondary" className="hostMetaItem">
+                          <SettingOutlined />
+                          <span className="hostMetaText">-</span>
+                        </Text>
+                      )}
 	                  </div>
                 </Space>
               </Card>
@@ -2556,9 +2620,9 @@ function App() {
                                                 </Text>
                                                 {t.description ? (
                                                   <Tooltip title={t.description}>
-                                                    <span className="capToolDesc ant-typography ant-typography-secondary">
+                                                    <Text type="secondary" className="capToolDesc">
                                                       {t.description}
-                                                    </span>
+                                                    </Text>
                                                   </Tooltip>
                                                 ) : null}
                                               </div>

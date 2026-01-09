@@ -7,6 +7,7 @@ import { readHostConfigFile } from '../services/HostFileService.js';
 import { capabilitiesOkTtlMs, readCapabilitiesCacheEntry, writeCapabilitiesCache } from '../services/CapabilitiesCacheService.js';
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { spawn } from 'node:child_process';
 
 const router = Router();
 
@@ -88,6 +89,56 @@ router.get('/host-config-file', async (req: Request, res: Response) => {
     });
   } catch (error) {
     console.error('Failed to read host config file:', error);
+    res.status(500).json({
+      success: false,
+      error: error instanceof Error ? error.message : 'Unknown error'
+    });
+  }
+});
+
+/**
+ * POST /api/mcp/open-project-folder
+ * 打开指定 host 的项目目录（仅 project host）
+ * body: { hostId: string }
+ */
+router.post('/open-project-folder', async (req: Request, res: Response) => {
+  try {
+    const { hostId } = req.body ?? {};
+    if (!hostId || typeof hostId !== 'string') {
+      return res.status(400).json({ success: false, error: 'Missing required field: hostId' });
+    }
+
+    const hosts = await configService.getHosts();
+    const host = hosts.find(h => h.id === hostId);
+    if (!host) {
+      return res.status(404).json({ success: false, error: `Host not found: ${hostId}` });
+    }
+    if (host.scope !== 'project' || !host.projectPath) {
+      return res.status(400).json({ success: false, error: 'Selected host is not a project host' });
+    }
+
+    const folderPath = path.resolve(host.projectPath);
+    const stat = await fs.stat(folderPath);
+    if (!stat.isDirectory()) {
+      return res.status(400).json({ success: false, error: `Not a directory: ${folderPath}` });
+    }
+
+    const spawnDetached = (cmd: string, args: string[]) => {
+      const child = spawn(cmd, args, { stdio: 'ignore', detached: true });
+      child.unref();
+    };
+
+    if (process.platform === 'darwin') {
+      spawnDetached('open', [folderPath]);
+    } else if (process.platform === 'win32') {
+      spawnDetached('explorer.exe', [folderPath]);
+    } else {
+      spawnDetached('xdg-open', [folderPath]);
+    }
+
+    res.json({ success: true, data: { hostId, folderPath } });
+  } catch (error) {
+    console.error('Failed to open project folder:', error);
     res.status(500).json({
       success: false,
       error: error instanceof Error ? error.message : 'Unknown error'

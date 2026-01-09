@@ -127,6 +127,48 @@ body.dark .iconToggleSecretsRedacted {
   margin-top: 12px;
 }
 
+.hostMetaItem {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.hostMetaItemWrap {
+  align-items: center;
+}
+
+.hostMetaText {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hostMetaTextWrap {
+  overflow: visible;
+  text-overflow: unset;
+  white-space: normal;
+  word-break: break-all;
+}
+
+.hostMetaClickable {
+  cursor: pointer;
+}
+
+.hostMetaClickable:hover {
+  text-decoration: underline;
+}
+
+.hostMetaLink {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  max-width: 100%;
+}
+
 .serverListHeader {
   display: flex;
   justify-content: space-between;
@@ -168,6 +210,14 @@ body.dark .iconToggleSecretsRedacted {
 
 .mcpNameDisabled:hover {
   color: rgba(0, 0, 0, 0.65) !important;
+}
+
+body.dark .mcpNameDisabled {
+  color: rgba(255, 255, 255, 0.55) !important;
+}
+
+body.dark .mcpNameDisabled:hover {
+  color: rgba(255, 255, 255, 0.75) !important;
 }
 
 .statusDot {
