@@ -1808,7 +1808,16 @@ function App() {
           ) : (
             <>
               <div ref={configCardRef} className={flashTarget === 'config' ? 'flashTarget' : ''}>
-              <Card className="card" title={`配置源（${toolOptions.length}）`} style={{ marginBottom: 16 }}>
+              <Card
+                className="card"
+                title={(
+                  <span className="cardTitle">
+                    <SettingOutlined />
+                    <span>{`配置源（${toolOptions.length}）`}</span>
+                  </span>
+                )}
+                style={{ marginBottom: 16 }}
+              >
                 <Space direction="vertical" size={12} style={{ width: '100%' }}>
                   <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
                     {(() => {
@@ -1975,7 +1984,15 @@ function App() {
               </div>
 
               <div ref={mcpListCardRef} className={flashTarget === 'mcpList' ? 'flashTarget' : ''}>
-              <Card className="card" title={`MCP (${serverEntries.length}${serverEntries.length !== Object.keys(servers).length ? ` / 总计 ${Object.keys(servers).length}` : ''})`}>
+              <Card
+                className="card"
+                title={(
+                  <span className="cardTitle">
+                    <RobotOutlined />
+                    <span>{`MCP (${serverEntries.length}${serverEntries.length !== Object.keys(servers).length ? ` / 总计 ${Object.keys(servers).length}` : ''})`}</span>
+                  </span>
+                )}
+              >
                 <div className="serverListHeader">
                   <Input.Search
                     allowClear
