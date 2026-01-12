@@ -2,6 +2,15 @@
   min-height: 100%;
 }
 
+.particlesCanvas {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
+  z-index: 0;
+  pointer-events: none;
+}
+
 .appHeader {
   display: flex;
   align-items: center;
@@ -14,6 +23,8 @@
   background: rgba(255, 255, 255, 0.8);
   backdrop-filter: blur(10px);
   border-bottom: 1px solid rgba(5, 5, 5, 0.06);
+  position: relative;
+  z-index: 1;
 }
 
 body.dark .appHeader {
@@ -108,12 +119,16 @@ body.dark .iconToggleSecretsRaw {
 
 .appContent {
   padding: 24px;
+  position: relative;
+  z-index: 1;
 }
 
 .appFooter {
   text-align: center;
   background: transparent;
   padding: 12px 24px 20px;
+  position: relative;
+  z-index: 1;
 }
 
 .container {

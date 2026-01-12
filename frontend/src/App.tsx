@@ -5,6 +5,7 @@ import Editor from '@monaco-editor/react';
 import { mcpApi } from './services/api';
 import { MCPForm } from './components/MCPForm';
 import { MarketplaceDrawer, type MarketplaceTemplate } from './components/MarketplaceDrawer';
+import { ParticlesBackground } from './components/ParticlesBackground';
 import './App.css';
 
 const { Title, Text } = Typography;
@@ -1770,6 +1771,7 @@ function App() {
   return (
     <ConfigProvider theme={{ algorithm: darkMode ? antdTheme.darkAlgorithm : antdTheme.defaultAlgorithm }}>
     <Layout className="appLayout">
+      <ParticlesBackground dark={darkMode} />
       <Header className="appHeader">
         <Space direction="vertical" size={0}>
           <Title level={3} className="appTitle" style={{ margin: 0 }}>MCP Manager</Title>
